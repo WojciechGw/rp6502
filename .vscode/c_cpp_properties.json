@@ -1,5 +1,4 @@
 {
-    "version": 4,
     "configurations": [
         {
             "name": "Pico",
@@ -8,17 +7,16 @@
                 "${userHome}/.pico-sdk/sdk/2.1.1/**"
             ],
             "forcedInclude": [
-                "${workspaceFolder}/build/generated/pico_base/pico/config_autogen.h",
-                "${userHome}/.pico-sdk/sdk/2.1.1/src/common/pico_base_headers/include/pico.h"
+                "${userHome}/.pico-sdk/sdk/2.1.1/src/common/pico_base_headers/include/pico.h",
+                "${workspaceFolder}/build/generated/pico_base/pico/config_autogen.h"
             ],
-            "compilerPath": "${userHome}/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-gcc",
-            "compileCommands": [
-                "${workspaceFolder}/build/compile_commands.json"
-            ],
-            "cStandard": "gnu11",
-            "cppStandard": "gnu++17",
-            "intelliSenseMode": "gcc-arm",
-            "configurationProvider": "ms-vscode.cmake-tools"
+            "defines": [],
+            "compilerPath": "${userHome}/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-gcc.exe",
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+            "cStandard": "c17",
+            "cppStandard": "c++14",
+            "intelliSenseMode": "linux-gcc-arm"
         }
-    ]
+    ],
+    "version": 4
 }
