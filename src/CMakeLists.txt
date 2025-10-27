@@ -30,6 +30,13 @@ target_compile_definitions(rp6502_ria PRIVATE
     LFS_NAME_MAX=16
 )
 
+# to disables all cyw43 debug infos
+add_compile_definitions(
+  PICO_CYW43_LOGGING_ENABLED=0        # SDK ≥ 2.0 … 2.1+ (disables all cyw43 printf)
+  PICO_CYW43_ARCH_DEBUG_ENABLED=0     # SDK 1.x fallback
+  LWIP_DEBUG=0                        # silence lwIP
+)
+
 target_compile_options(rp6502_ria PRIVATE
     -Wall -Wextra
     $<$<AND:$<CONFIG:Debug>,$<BOOL:${rp6502_ria_w}>>:-Os>
