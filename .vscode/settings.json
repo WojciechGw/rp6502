@@ -1,10 +1,5 @@
 {
-    "search.exclude": {
-        "src/fatfs": true,
-        "src/littlefs": true,
-        "src/pico-extras": true,
-        "src/tinyusb": true,
-    },
+    "cmake.showSystemKits": false,
     "cmake.options.statusBarVisibility": "hidden",
     "cmake.options.advanced": {
         "build": {
