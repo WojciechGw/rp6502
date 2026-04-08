@@ -27,7 +27,8 @@ static enum state {
     pix_api_nak,
 } pix_api_state;
 
-#define PIX_ACK_TIMEOUT_MS 2
+// Timeout needs a full VGA frame
+#define PIX_ACK_TIMEOUT_MS 20
 
 void pix_reclock(uint16_t clkdiv_int, uint8_t clkdiv_frac)
 {

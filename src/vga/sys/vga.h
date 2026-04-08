@@ -40,7 +40,7 @@ typedef enum
 } vga_canvas_t;
 
 void vga_set_display(vga_display_t display);
-bool vga_xreg_canvas(uint16_t *xregs);
+void vga_xreg_canvas(uint16_t *xregs);
 int16_t vga_canvas_height(void);
 
 bool vga_prog_fill(int16_t plane, int16_t scanline_begin, int16_t scanline_end,

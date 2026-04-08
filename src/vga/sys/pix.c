@@ -23,12 +23,8 @@ static bool pix_ch0_xreg(uint8_t addr, uint16_t word)
     if (addr < PIX_CH0_XREGS_MAX)
         xregs[addr] = word;
     if (addr == 0) // CANVAS
-    {
-        if (vga_xreg_canvas(xregs))
-            ria_ack();
-        else
-            ria_nak();
-    }
+        // vga.c handles ack/nak internally
+        vga_xreg_canvas(xregs);
     if (addr == 1) // MODE
     {
         if (main_prog(xregs))

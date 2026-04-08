@@ -49,6 +49,7 @@ static vga_canvas_t vga_canvas_selected;
 static volatile scanvideo_mode_t const *vga_scanvideo_mode_current;
 static scanvideo_mode_t const *vga_scanvideo_mode_selected;
 static volatile bool vga_scanvideo_mode_switching;
+static volatile bool vga_canvas_ack_pending;
 static scanvideo_scanline_buffer_t *volatile vga_scanline_buffer_core0;
 
 static const scanvideo_timing_t vga_timing_640x480_60_cea = {
@@ -297,6 +298,12 @@ static void vga_scanvideo_switch(void)
     vga_canvas_current = vga_canvas_selected;
     vga_scanvideo_mode_switching = false;
 
+    if (vga_canvas_ack_pending)
+    {
+        vga_canvas_ack_pending = false;
+        ria_ack();
+    }
+
     mutex_exit(&vga_mode_mutex);
 }
 
@@ -464,15 +471,22 @@ void vga_set_display(vga_display_t display)
 }
 
 // Also accepts NULL for reset to vga_console.
-bool vga_xreg_canvas(uint16_t *xregs)
+// When xregs is non-NULL (pix xreg), sends ACK/NAK via backchannel.
+// ACK is deferred until vga_scanvideo_switch() when a mode switch is pending.
+void vga_xreg_canvas(uint16_t *xregs)
 {
+    vga_canvas_ack_pending = false;
     vga_canvas_t canvas = xregs ? xregs[0] : vga_console;
     switch (canvas)
     {
     case vga_console:
         // prevent flicker when reset not needed
         if (vga_canvas_selected == vga_console)
-            return true;
+        {
+            if (xregs)
+                ria_ack();
+            return;
+        }
         __attribute__((fallthrough));
     case vga_320_240:
     case vga_320_180:
@@ -482,12 +496,20 @@ bool vga_xreg_canvas(uint16_t *xregs)
         vga_scanvideo_update();
         break;
     default:
-        return false;
+        if (xregs)
+            ria_nak();
+        return;
     }
     memset(&vga_prog, 0, sizeof(vga_prog));
     if (canvas == vga_console)
         vga_reset_console_prog();
-    return true;
+    if (xregs)
+    {
+        if (vga_scanvideo_mode_switching)
+            vga_canvas_ack_pending = true;
+        else
+            ria_ack();
+    }
 }
 
 int16_t vga_canvas_height(void)
