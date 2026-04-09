@@ -2,6 +2,9 @@
  * Copyright (c) 2025 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
+ *
+ * Copyright (c) 2026 WojciechGw
+ *
  */
 
 #ifndef _RIA_API_MTH_H_
