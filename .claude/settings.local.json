@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wsl -e bash -c \"cat /home/wojciech/git/cc65/libsrc/rp6502/phi2.c\")",
+      "Bash(wsl -e bash -c \"cat /home/wojciech/git/cc65/libsrc/rp6502/ria.s\")",
+      "Bash(wsl -e bash -c \"cat /home/wojciech/git/cc65/libsrc/rp6502/clock.c\")",
+      "Bash(wsl -e bash -c \"cat /home/wojciech/git/cc65/include/rp6502.h\")",
+      "Bash(wsl -e bash -c \"cat /home/wojciech/git/cc65/libsrc/rp6502/write.c\")",
+      "Bash(wsl -e bash -c \"cat /home/wojciech/git/cc65/libsrc/rp6502/ria_attr.c && cat /home/wojciech/git/cc65/libsrc/rp6502/f_lseek.c\")",
+      "Bash(wsl -e bash -c \"ls /home/wojciech/git/cc65/include/ | grep -i math\")",
+      "Bash(wsl -e bash -c \"ls /home/wojciech/git/cc65/libsrc/rp6502/../ | head -20 && cat /home/wojciech/git/cc65/libsrc/Makefile 2>/dev/null | grep -A5 rp6502 | head -20\")",
+      "Bash(wsl -e bash -c \"ls /home/wojciech/git/cc65/libsrc/rp6502/ | wc -l && cat /home/wojciech/git/cc65/cfg/rp6502.cfg 2>/dev/null | head -5\")",
+      "Bash(wsl -e bash -c \"grep -r 'rp6502' /home/wojciech/git/cc65/libsrc/Makefile | head -10\")",
+      "Bash(wsl -e bash -c \"grep -A3 'rp6502' /home/wojciech/git/cc65/libsrc/Makefile | head -30\")",
+      "Bash(wsl -e bash -c \"head -60 /home/wojciech/git/cc65/libsrc/Makefile\")",
+      "Bash(wsl -e bash -c \"grep -n '\\\\.c\\\\|\\\\.s\\\\|OBJS\\\\|SRC' /home/wojciech/git/cc65/libsrc/Makefile | head -20\")",
+      "Bash(wsl -e bash -c \"grep -n 'RIA_OP_GETFREE\\\\|C API\\\\|typedef struct\\\\|int __cdecl' /home/wojciech/git/cc65/include/rp6502.h\")",
+      "Bash(wsl -e bash -c \"sed -n '128,165p' /home/wojciech/git/cc65/include/rp6502.h\")",
+      "Bash(wsl -e bash -c \"grep -n 'XREG location\\\\|f_getfree\\\\|#endif' /home/wojciech/git/cc65/include/rp6502.h\")",
+      "Bash(wsl -e bash -c \"sed -n '130,132p' /home/wojciech/git/cc65/include/rp6502.h | cat -A\")",
+      "Bash(wsl -e bash -c ':*)"
+    ]
+  }
+}
