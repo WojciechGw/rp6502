@@ -21,11 +21,6 @@ target_include_directories(rp6502_vga PRIVATE
 )
 
 target_compile_definitions(rp6502_vga PRIVATE
-    PICO_SCANVIDEO_PLANE_COUNT=3
-    PICO_SCANVIDEO_MAX_SCANLINE_BUFFER_WORDS=323
-    PICO_SCANVIDEO_SCANLINE_BUFFER_COUNT=10
-    PICO_SCANVIDEO_COLOR_PIN_BASE=6
-    PICO_SCANVIDEO_SYNC_PIN_BASE=26
     PICO_RP2040_USB_DEVICE_ENUMERATION_FIX=1
     PICO_RP2040_USB_DEVICE_UFRAME_FIX=1
 )
@@ -69,10 +64,6 @@ pico_generate_pio_header(rp6502_vga
 
 pico_generate_pio_header(rp6502_vga
     ${CMAKE_CURRENT_LIST_DIR}/scanvideo/scanvideo.pio
-)
-
-pico_generate_pio_header(rp6502_vga
-    ${CMAKE_CURRENT_LIST_DIR}/scanvideo/timing.pio
 )
 
 # Override various lib files with custom code.
