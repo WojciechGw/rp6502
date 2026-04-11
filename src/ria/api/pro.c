@@ -56,12 +56,11 @@ void pro_stop(void)
         pro_running[0] = '\0';
         return;
     }
-    bool relaunch = pro_launcher[0] != '\0' &&
-                    strcmp(pro_running, pro_launcher) != 0;
+    bool relaunch = !pro_is_launcher() && pro_launcher[0] != '\0';
     pro_running[0] = '\0';
     if (!relaunch)
         pro_launcher[0] = '\0';
-    if (relaunch)
+    else
     {
         pro_argv_clear();
         pro_argv_append(pro_launcher);
@@ -227,6 +226,12 @@ void pro_set_launcher(bool is_launcher)
     }
     else
         pro_launcher[0] = '\0';
+}
+
+bool pro_is_launcher(void)
+{
+    return pro_launcher[0] != '\0' &&
+           strcmp(pro_running, pro_launcher) == 0;
 }
 
 int16_t pro_get_exit_code(void)

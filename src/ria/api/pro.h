@@ -41,6 +41,7 @@ bool pro_api_exec(void);
  */
 bool pro_get_launcher(void);
 void pro_set_launcher(bool is_launcher);
+bool pro_is_launcher(void);
 int16_t pro_get_exit_code(void);
 
 // Load a ROM via NFC

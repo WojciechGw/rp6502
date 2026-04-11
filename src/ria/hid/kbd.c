@@ -7,6 +7,7 @@
 #include "main.h"
 #include "api/api.h"
 #include "api/oem.h"
+#include "api/pro.h"
 #include "hid/kbd.h"
 #include "hid/hid.h"
 #include "mon/mon.h"
@@ -455,7 +456,7 @@ static void kbd_queue_key(uint8_t modifier, uint8_t keycode, bool initial_press)
         switch (keycode)
         {
         case HID_KEY_F4:
-            if (key_alt)
+            if (key_alt && !pro_is_launcher())
             {
                 // alt-f4 exits and returns to launcher
                 kbd_key_queue_tail = kbd_key_queue_head;
