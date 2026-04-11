@@ -18,6 +18,7 @@
  */
 
 void std_init(void);
+void std_task(void);
 void std_stop(void);
 
 /* The API implementation for stdio support.

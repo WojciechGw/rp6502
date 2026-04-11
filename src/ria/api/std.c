@@ -71,7 +71,8 @@ static std_fd_t *std_fd;
 static char *std_buf;
 static uint16_t std_size;
 static uint16_t std_pos;
-static int32_t std_pix;
+static uint16_t std_xram_addr;
+static uint16_t std_xram_len;
 
 // Readline state for stdin.
 static bool std_rln_active;
@@ -270,36 +271,37 @@ bool std_api_read_xram(void)
 {
     if (std_fd)
     {
-        if (std_pix >= 0)
+        if (std_pos < std_size)
         {
-            // send xram result to pix devices
-            uint16_t xram_addr = std_buf - (char *)xram;
-            for (; std_pix > 0 && pix_ready(); --std_pix, ++xram_addr, ++std_buf)
-                pix_send(PIX_DEVICE_XRAM, 0, xram[xram_addr], xram_addr);
-            if (std_pix <= 0)
+            // Read phase: request next 512-byte chunk
+            uint32_t chunk = std_size - std_pos;
+            if (chunk > 512)
+                chunk = 512;
+            uint32_t bytes_read;
+            api_errno err = API_EIO;
+            std_rw_result result = std_fd->read(std_fd->desc,
+                                                &std_buf[std_pos], chunk,
+                                                &bytes_read, &err);
+            std_pos += bytes_read;
+            std_xram_len += bytes_read;
+            if (result == STD_PENDING)
+                return api_working();
+            if (result == STD_ERROR)
             {
-                std_pix = -1;
+                std_xram_len = 0;
                 std_fd = NULL;
-                return api_return_ax(std_pos);
+                return api_return_errno(err);
             }
+            // STD_OK: short read means no more data available
+            if (bytes_read < chunk)
+                std_size = std_pos;
             return api_working();
         }
-        uint32_t bytes_read;
-        api_errno err = API_EIO;
-        std_rw_result result = std_fd->read(std_fd->desc,
-                                            &std_buf[std_pos], std_size - std_pos,
-                                            &bytes_read, &err);
-        std_pos += bytes_read;
-        if (result == STD_PENDING)
+        // All reads done — wait for PIX drain to complete
+        if (std_xram_len > 0)
             return api_working();
-        if (result == STD_ERROR)
-        {
-            std_pix = -1;
-            std_fd = NULL;
-            return api_return_errno(err);
-        }
-        std_pix = std_pos;
-        return api_working();
+        std_fd = NULL;
+        return api_return_ax(std_pos);
     }
     uint16_t xram_addr;
     if (!api_pop_uint16(&std_size) || !api_pop_uint16_end(&xram_addr))
@@ -316,6 +318,8 @@ bool std_api_read_xram(void)
     std_buf = (char *)&xram[xram_addr];
     std_fd = fd;
     std_pos = 0;
+    std_xram_addr = xram_addr;
+    std_xram_len = 0;
     return api_working();
 }
 
@@ -448,9 +452,18 @@ bool std_api_lseek_llvm(void)
     return api_return_axsreg(pos);
 }
 
+void std_task(void)
+{
+    while (std_xram_len && pix_ready())
+    {
+        pix_send(PIX_DEVICE_XRAM, 0, xram[std_xram_addr], std_xram_addr);
+        ++std_xram_addr;
+        --std_xram_len;
+    }
+}
+
 void std_init(void)
 {
-    std_pix = -1;
     std_fd_pool[STD_FD_STDIN].is_open = true;
     std_fd_pool[STD_FD_STDIN].read = std_stdin_read;
     std_fd_pool[STD_FD_STDOUT].is_open = true;
@@ -467,7 +480,6 @@ void std_init(void)
 
 void std_stop(void)
 {
-    std_pix = -1;
     std_fd = NULL;
     std_rln_active = false;
     std_rln_needs_nl = false;

@@ -96,6 +96,7 @@ static void init(void)
 void main_task(void)
 {
     usb_task();
+    std_task();
     cpu_task();
     ria_task();
     kbd_task();
