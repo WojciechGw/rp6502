@@ -273,10 +273,11 @@ bool std_api_read_xram(void)
     {
         if (std_pos < std_size)
         {
-            // Read phase: request next 512-byte chunk
+            // Read phase: request next chunk
+            // 128 bytes is tuned for FatFs
             uint32_t chunk = std_size - std_pos;
-            if (chunk > 512)
-                chunk = 512;
+            if (chunk > 128)
+                chunk = 128;
             uint32_t bytes_read;
             api_errno err = API_EIO;
             std_rw_result result = std_fd->read(std_fd->desc,
