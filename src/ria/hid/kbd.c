@@ -454,12 +454,23 @@ static void kbd_queue_key(uint8_t modifier, uint8_t keycode, bool initial_press)
     {
         switch (keycode)
         {
+        case HID_KEY_F4:
+            if (key_alt)
+            {
+                // alt-f4 exits and returns to launcher
+                kbd_key_queue_tail = kbd_key_queue_head;
+                kbd_alt_mode = false;
+                kbd_dead_key0 = kbd_dead_key1 = 0;
+                api_set_ax(0xFFFF);
+                mon_break();
+                main_stop();
+                return;
+            }
+            break;
         case HID_KEY_DELETE:
             if (key_ctrl && key_alt)
             {
-                // These reset here instead of kbd_break
-                // because we want them to reset only on
-                // ctrl-alt-del and not UART breaks.
+                // ctrl-alt-del always exits to monitor
                 kbd_key_queue_tail = kbd_key_queue_head;
                 kbd_alt_mode = false;
                 kbd_dead_key0 = kbd_dead_key1 = 0;

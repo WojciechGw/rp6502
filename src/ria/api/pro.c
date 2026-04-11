@@ -28,6 +28,8 @@ static char pro_running[256];
 // Records the launcher that will re-run when program ends.
 static char pro_launcher[256];
 
+static int16_t pro_exit_code;
+
 // A zero terminated list of uint16 which points
 // to zero terminated strings within pro_argv.
 // Maintans no space between pointers and chars.
@@ -47,6 +49,7 @@ void pro_run(void)
 
 void pro_stop(void)
 {
+    pro_exit_code = API_AX;
     if (rom_active())
     {
         // pro_api_exec or pro_nfc launching
@@ -224,6 +227,11 @@ void pro_set_launcher(bool is_launcher)
     }
     else
         pro_launcher[0] = '\0';
+}
+
+int16_t pro_get_exit_code(void)
+{
+    return pro_exit_code;
 }
 
 void pro_nfc(const uint8_t *tag_data, size_t len)

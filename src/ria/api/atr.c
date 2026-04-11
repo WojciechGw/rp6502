@@ -30,6 +30,7 @@ static inline void DBG(const char *fmt, ...) { (void)fmt; }
 #define ATR_LRAND 0x04
 #define ATR_BEL 0x05
 #define ATR_LAUNCHER 0x06
+#define ATR_EXIT_CODE 0x07
 
 // long ria_get_attr(uint8_t attr_id);
 bool atr_api_get(void)
@@ -50,6 +51,8 @@ bool atr_api_get(void)
         return api_return_axsreg(com_get_bel());
     case ATR_LAUNCHER:
         return api_return_axsreg(pro_get_launcher());
+    case ATR_EXIT_CODE:
+        return api_return_axsreg(pro_get_exit_code());
     default:
         return api_return_errno(API_EINVAL);
     }
@@ -82,7 +85,8 @@ bool atr_api_set(void)
     case ATR_LAUNCHER:
         pro_set_launcher((bool)!!(uint8_t)value);
         break;
-    case ATR_LRAND: // Read only
+    case ATR_LRAND:     // Read only
+    case ATR_EXIT_CODE: // Read only
     default:
         return api_return_errno(API_EINVAL);
     }
