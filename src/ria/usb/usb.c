@@ -173,23 +173,8 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t idx)
 bool usb_boot_enumerating(void)
 {
     static bool usb_boot_enum_finished;
-    static bool was_connected;
     if (usb_boot_enum_finished)
         return false;
-    // true when a device being enumerated
-    bool connected = tuh_connected(0);
-    if (connected)
-    {
-        was_connected = true;
-        return true;
-    }
-    if (was_connected)
-    {
-        was_connected = false;
-        usb_enum_timeout = make_timeout_time_ms(USB_ENUM_WINDOW_MS);
-        DBG("USB: %lums CONNECT\n", to_ms_since_boot(get_absolute_time()));
-    }
-    // Not currently enumerating — wait for the timeout before finishing
     if (time_reached(usb_enum_timeout))
     {
         usb_boot_enum_finished = true;
