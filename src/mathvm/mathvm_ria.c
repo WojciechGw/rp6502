@@ -17,6 +17,41 @@ static uint32_t rd_u32le(const uint8_t *p)
            ((uint32_t)p[3] << 24);
 }
 
+static void wr_u16le(uint8_t *p, uint16_t value)
+{
+    p[0] = (uint8_t)(value & 0xFFu);
+    p[1] = (uint8_t)(value >> 8);
+}
+
+static bool mx_check_xram_range(mx_vm_t *vm, uint16_t addr, uint32_t size)
+{
+    if ((uint32_t)addr + size > 0x10000u)
+    {
+        vm->status = MX_ERR_BAD_XRAM;
+        return false;
+    }
+    return true;
+}
+
+static bool mx_check_xram_args(mx_vm_t *vm)
+{
+    bool use_in = (vm->hdr.flags & MX_FLAG_USE_XRAM_IN) != 0u;
+    bool use_out = (vm->hdr.flags & MX_FLAG_USE_XRAM_OUT) != 0u;
+
+    if (vm->hdr.count == 0u)
+    {
+        vm->status = MX_ERR_HEADER;
+        return false;
+    }
+    if (use_in != (vm->hdr.xram_in != 0xFFFFu) ||
+        use_out != (vm->hdr.xram_out != 0xFFFFu))
+    {
+        vm->status = MX_ERR_HEADER;
+        return false;
+    }
+    return true;
+}
+
 static bool mx_read_u8(mx_vm_t *vm, uint8_t *value)
 {
     if (vm->pc >= vm->hdr.prog_len)
@@ -271,6 +306,91 @@ static bool mx_exec_spr2l(mx_vm_t *vm, uint8_t ab, uint8_t sb, uint8_t flags)
     return true;
 }
 
+static bool mx_exec_m3v3p2x(mx_vm_t *vm, uint8_t mb, uint8_t cb)
+{
+    uint16_t in_addr = vm->hdr.xram_in;
+    uint16_t out_addr = vm->hdr.xram_out;
+    float d;
+    float cx;
+    float cy;
+    uint16_t i;
+
+    if ((vm->hdr.flags & (MX_FLAG_USE_XRAM_IN | MX_FLAG_USE_XRAM_OUT)) !=
+        (MX_FLAG_USE_XRAM_IN | MX_FLAG_USE_XRAM_OUT))
+    {
+        vm->status = MX_ERR_PROGRAM;
+        return false;
+    }
+    if (!mx_check_local(vm, mb, 9) || !mx_check_local(vm, cb, 3))
+        return false;
+    if (!mx_check_xram_range(vm, in_addr, (uint32_t)vm->hdr.count * 12u) ||
+        !mx_check_xram_range(vm, out_addr, (uint32_t)vm->hdr.count * 4u))
+        return false;
+
+    d = vm->locals[cb + 0].f32;
+    cx = vm->locals[cb + 1].f32;
+    cy = vm->locals[cb + 2].f32;
+
+    for (i = 0; i < vm->hdr.count; ++i)
+    {
+        float x;
+        float y;
+        float z;
+        float rx;
+        float sy;
+        float sz;
+        float denom;
+        float sxf;
+        float syf;
+        long sxl;
+        long syl;
+
+        x = ((mx_word_t){ .u32 = rd_u32le(&xram[in_addr + 0u]) }).f32;
+        y = ((mx_word_t){ .u32 = rd_u32le(&xram[in_addr + 4u]) }).f32;
+        z = ((mx_word_t){ .u32 = rd_u32le(&xram[in_addr + 8u]) }).f32;
+
+        rx = fmaf(vm->locals[mb + 0].f32, x,
+                  fmaf(vm->locals[mb + 1].f32, y,
+                       vm->locals[mb + 2].f32 * z));
+        sy = fmaf(vm->locals[mb + 3].f32, x,
+                  fmaf(vm->locals[mb + 4].f32, y,
+                       vm->locals[mb + 5].f32 * z));
+        sz = fmaf(vm->locals[mb + 6].f32, x,
+                  fmaf(vm->locals[mb + 7].f32, y,
+                       vm->locals[mb + 8].f32 * z));
+
+        denom = d - sz;
+        if (!isfinite(denom) || denom < 1.0f)
+            denom = 1.0f;
+
+        sxf = cx + (rx * d) / denom;
+        syf = cy - (sy * d) / denom;
+        if (!isfinite(sxf) || !isfinite(syf))
+        {
+            vm->status = MX_ERR_NUMERIC;
+            return false;
+        }
+
+        sxl = lroundf(sxf);
+        syl = lroundf(syf);
+        if (sxl < INT16_MIN)
+            sxl = INT16_MIN;
+        else if (sxl > INT16_MAX)
+            sxl = INT16_MAX;
+        if (syl < INT16_MIN)
+            syl = INT16_MIN;
+        else if (syl > INT16_MAX)
+            syl = INT16_MAX;
+
+        wr_u16le(&xram[out_addr + 0u], (uint16_t)(int16_t)sxl);
+        wr_u16le(&xram[out_addr + 2u], (uint16_t)(int16_t)syl);
+        in_addr = (uint16_t)(in_addr + 12u);
+        out_addr = (uint16_t)(out_addr + 4u);
+    }
+
+    return true;
+}
+
 static uint16_t mx_xstack_pull_frame(uint8_t *frame, size_t frame_cap)
 {
     size_t frame_len = XSTACK_SIZE - xstack_ptr;
@@ -332,9 +452,7 @@ bool mx_load_frame(mx_vm_t *vm, const uint8_t *frame, uint16_t frame_len)
         return false;
     }
 
-    bad_flags = vm->hdr.flags & (MX_FLAG_USE_XRAM_IN |
-                                 MX_FLAG_USE_XRAM_OUT |
-                                 MX_FLAG_DEBUG |
+    bad_flags = vm->hdr.flags & (MX_FLAG_DEBUG |
                                  MX_FLAG_RESERVED5 |
                                  MX_FLAG_RESERVED6 |
                                  MX_FLAG_RESERVED7);
@@ -347,13 +465,6 @@ bool mx_load_frame(mx_vm_t *vm, const uint8_t *frame, uint16_t frame_len)
         (vm->hdr.flags & MX_FLAG_SATURATE) == 0u)
     {
         vm->status = MX_ERR_HEADER;
-        return false;
-    }
-    if (vm->hdr.count != 1u ||
-        vm->hdr.xram_in != 0xFFFFu ||
-        vm->hdr.xram_out != 0xFFFFu)
-    {
-        vm->status = MX_ERR_UNSUPPORTED;
         return false;
     }
     if (vm->hdr.local_words > MX_MAX_LOCALS ||
@@ -379,6 +490,9 @@ bool mx_load_frame(mx_vm_t *vm, const uint8_t *frame, uint16_t frame_len)
     memcpy(vm->program,
            frame + sizeof(mx_header_t) + ((size_t)vm->hdr.local_words * MX_WORD_BYTES),
            vm->hdr.prog_len);
+
+    if (!mx_check_xram_args(vm))
+        return false;
 
     vm->status = MX_OK;
     return true;
@@ -836,6 +950,17 @@ bool mx_exec(mx_vm_t *vm)
             if (!mx_read_u8(vm, &ab) || !mx_read_u8(vm, &sb) || !mx_read_u8(vm, &flags))
                 return false;
             if (!mx_exec_spr2l(vm, ab, sb, flags))
+                return false;
+            break;
+        }
+
+        case MX_M3V3P2X: {
+            uint8_t mb;
+            uint8_t cb;
+
+            if (!mx_read_u8(vm, &mb) || !mx_read_u8(vm, &cb))
+                return false;
+            if (!mx_exec_m3v3p2x(vm, mb, cb))
                 return false;
             break;
         }

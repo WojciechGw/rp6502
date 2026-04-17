@@ -10,6 +10,8 @@ Pliki:
 - `mathvm_negative_ca65.s`: ten sam zestaw negatywnych testów w czystym `6502 asm`
 - `mathvm_mathcop_cc65.c`: test zgodności `MATHVM` wzorowany na `MTHexamples/mathcop.c`
 - `mathvm_batch_benchmark_cc65.c`: benchmark jednego wywołania `MATHVM` vs wielu scalar RPC `mth_*`
+- `mathvm_dodecahedron_batch_cc65.c`: dwunastościan z jednym wywołaniem `MATHVM` na klatkę dla wszystkich 20 wierzchołków
+- `mathvm_dodecahedron_debug_cc65.c`: debug batcha dwunastościanu, wypisuje zakres i pierwsze współrzędne z `xram_out`
 - `spr2l_bbox_cc65.c`: przykład `SPR2L` w `cc65 C`
 - `spr2l_bbox_ca65.s`: przykład `SPR2L` w czystym `6502 asm`
 - `spr2l_corners_cc65.c`: przykład `SPR2L` zwracający 4 rogi w `cc65 C`
@@ -57,6 +59,13 @@ Najważniejsze adresy:
 - `$FFF1`: wejście do `wait/return trampoline`
 
 To są przykłady minimalne, bez integracji z istniejącym API `cc65`.
+
+Przykład `mathvm_dodecahedron_batch_cc65.c`:
+
+- zapisuje 20 wierzchołków `vec3` do `XRAM`
+- robi jedno wywołanie `MATHVM` na klatkę
+- nowy opcode batch czyta wszystkie rekordy z `xram_in` i zapisuje `int16 x/y` do `xram_out`
+- przez pierwsze 180 stopni rysuje krawędzie, a przez drugie 180 stopni tylko punkty wierzchołków
 
 Przykład `mathvm_negative_cc65.c` wypisuje tylko `status` i `words` dla:
 

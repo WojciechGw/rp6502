@@ -137,6 +137,7 @@ typedef enum
     MX_BBOX2 = 0x49,
     MX_ROUND2I = 0x4A,
     MX_DDIV = 0x4B,
+    MX_M3V3P2X = 0x4C,
     MX_CMPZ = 0x60,
     MX_FCMPLT = 0x61,
     MX_FCMPGT = 0x62,
