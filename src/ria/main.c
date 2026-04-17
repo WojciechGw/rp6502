@@ -9,6 +9,7 @@
 #include "api/atr.h"
 #include "api/clk.h"
 #include "api/dir.h"
+#include "mathvm/mathvm.h"
 #include "api/mth.h"
 #include "api/oem.h"
 #include "api/pro.h"
@@ -339,6 +340,8 @@ bool main_api(uint8_t operation)
         return mth_api_dmul();
     case 0x4A:
         return mth_api_ddiv();
+    case RIA_OP_MATHVM:
+        return mathvm_api_op();
     }
     return api_return_errno(API_ENOSYS);
 }

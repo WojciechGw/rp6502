@@ -1043,11 +1043,19 @@ flags
 
     bit 1 = zwróć bbox: xmin ymin xmax ymax
 
-    bit 2 = zaokrąglij do integer screen space
+    bit 2 = zaokrąglij każdą współrzędną funkcją roundf() przed zwrotem
 
-    bit 3 = clamp / saturate do zakresu ekranu, jeśli podano screen rect w locals
+    bity 3..7 = v1: muszą być 0
 
-Najbardziej praktyczne są dwa warianty:
+Reguły v1:
+
+    dokładnie jeden z bitów 0 albo 1 musi być ustawiony
+
+    jeśli ustawiono bit 2, wynik nadal zajmuje float32 wordy; dopiero MX_FLAG_RETURN_I16 zmienia format zwrotu całej ramki
+
+    jeśli bity 3..7 są niezerowe, instrukcja zwraca MX_ERR_PROGRAM
+
+Najbardziej praktyczne warianty v1:
 
     flags = 0x01 → pełne 4 rogi
 
@@ -1274,11 +1282,11 @@ Jedno wywołanie RIA ma wykonać:
 
 1.2. Nazwa operacji OS
 
-Zakładam jeden numer operacji OS, np.:
+Przyjmuję jeden numer operacji OS:
 
-#define RIA_OP_MATHVM 0x7E
+#define RIA_OP_MATHVM 0x80
 
-To jest tylko przykład. Sam numer wybierzesz zgodnie z własnym firmware.
+To jest tymczasowa decyzja projektowa dla MATHVM v1, żeby nie kolidować z istniejącym `mth`.
 1.3. Jednostka danych VM
 
 Podstawową komórką VM jest:
@@ -1332,15 +1340,35 @@ typedef struct {
 2.3. Flagi nagłówka
 
 enum {
-    MX_FLAG_USE_XRAM_IN    = 0x01,
-    MX_FLAG_USE_XRAM_OUT   = 0x02,
-    MX_FLAG_RETURN_I16     = 0x04,  // wynik końcowy pakowany do int16
-    MX_FLAG_SATURATE       = 0x08,  // saturacja przy pakowaniu
-    MX_FLAG_DEBUG          = 0x10,  // interpreter może zwrócić dodatkowy kod
-    MX_FLAG_RESERVED5      = 0x20,
-    MX_FLAG_RESERVED6      = 0x40,
-    MX_FLAG_RESERVED7      = 0x80
+    MX_FLAG_USE_XRAM_IN    = 0x01,  // v1: musi być 0
+    MX_FLAG_USE_XRAM_OUT   = 0x02,  // v1: musi być 0
+    MX_FLAG_RETURN_I16     = 0x04,  // końcowy wynik zwracany jako 1x int16 na word
+    MX_FLAG_SATURATE       = 0x08,  // wymagane przy RETURN_I16, inaczej overflow = błąd
+    MX_FLAG_DEBUG          = 0x10,  // v1: musi być 0
+    MX_FLAG_RESERVED5      = 0x20,  // v1: musi być 0
+    MX_FLAG_RESERVED6      = 0x40,  // v1: musi być 0
+    MX_FLAG_RESERVED7      = 0x80   // v1: musi być 0
 };
+
+2.3.1. Ograniczenia v1
+
+Żeby pierwsza implementacja była mała i przewidywalna, v1 nie używa XRAM ani batch mode.
+
+Wymagania nagłówka dla v1:
+
+    count == 1
+
+    xram_in == 0xFFFF
+
+    xram_out == 0xFFFF
+
+    (flags & (MX_FLAG_USE_XRAM_IN | MX_FLAG_USE_XRAM_OUT |
+              MX_FLAG_DEBUG | MX_FLAG_RESERVED5 |
+              MX_FLAG_RESERVED6 | MX_FLAG_RESERVED7)) == 0
+
+    jeśli ustawiono MX_FLAG_RETURN_I16, to MX_FLAG_SATURATE też musi być ustawione
+
+Każde naruszenie powyższego zwraca MX_ERR_UNSUPPORTED albo MX_ERR_HEADER.
 
 2.4. Locals
 
@@ -1399,6 +1427,14 @@ typedef enum {
     MX_ERR_UNSUPPORTED = 0x0B
 } mx_status_t;
 
+Polityka błędów numerycznych w v1:
+
+    zwykłe operacje float (FADD, FMUL, FSIN, FCOS, FSQRT itd.) zachowują się jak IEEE754 float32 i nie zwracają błędu tylko dlatego, że wynik jest NaN/Inf
+
+    MX_ERR_NUMERIC jest używany tylko wtedy, gdy instrukcja wymaga wyniku skończonego lub reprezentowalnego w formacie wyjściowym
+
+    w v1 dotyczy to wyłącznie ścieżek pakowania / zaokrąglania do int16 oraz ewentualnych późniejszych opcode’ów ekranu
+
 3.2. Wynik na XSTACK
 
 Jeśli X = n, interpreter wypycha na XSTACK:
@@ -1415,7 +1451,20 @@ w normalnej kolejności słów:
 
     word(n-1)
 
-Host 6502 czyta potem 4*n bajtów przez $FFEC.
+Każdy word jest zapisany little-endian.
+
+W implementacji oznacza to:
+
+    host buduje ramkę w buforze liniowym [header][locals][bytecode]
+
+    host zapisuje ją na XSTACK od końca do początku
+
+    RIA czyta header jako pierwsze 16 bajtów, wylicza pełny frame_len i dociąga resztę
+
+    RIA zapisuje wynik tak, aby kolejne odczyty przez $FFEC zwracały:
+    word0 byte0, word0 byte1, word0 byte2, word0 byte3, word1 ...
+
+Host 6502 może więc traktować wynik jako liniowy bufor little-endian długości 4*n bajtów.
 4. Wewnętrzny układ pamięci VM w RIA
 
 To jest propozycja implementacyjna dla interpretera.
@@ -1444,6 +1493,16 @@ Czyli interpreter da się zmieścić w modelu „dużo da się zrobić w 512 baj
     skoki używają rel8 liczonych od końca instrukcji
 
     stos operandów przechowuje 32-bit words
+
+Walidacja i bezpieczeństwo v1:
+
+    program musi zakończyć się przez RET albo HALT
+
+    każdy odczyt argumentu instrukcji musi mieścić się w prog_len
+
+    skok nie może wyjść poza zakres 0..prog_len-1
+
+    interpreter ma limit 255 wykonanych instrukcji na jedno wywołanie; przekroczenie zwraca MX_ERR_PROGRAM
 
 5.2. Konwencja wektorów
 vec2
@@ -1548,6 +1607,43 @@ typedef enum {
     MX_JNZ        = 0x65, // arg: i8 rel
     MX_SELECT     = 0x66  // cond a b -> cond ? a : b
 } mx_opcode_t;
+
+Zakres implementacji v1
+
+Enum powyżej opisuje docelowy format bytecode, ale pierwsza implementacja wspiera tylko:
+
+    MX_NOP
+    MX_HALT
+    MX_RET
+
+    MX_PUSHF
+    MX_LDS
+    MX_LDV2
+    MX_LDV3
+    MX_DUP
+    MX_DROP
+    MX_SWAP
+
+    MX_FADD
+    MX_FSUB
+    MX_FMUL
+    MX_FDIV
+    MX_FMADD
+    MX_FNEG
+    MX_FABS
+    MX_FSQRT
+    MX_FSIN
+    MX_FCOS
+    MX_FMIN
+    MX_FMAX
+    MX_FROUND
+    MX_FTRUNC
+
+    MX_A2P2L
+    MX_M3V3L
+    MX_SPR2L
+
+Pozostałe opcode’y są zarezerwowane i w v1 zwracają MX_ERR_UNSUPPORTED.
 
 7. Binarny format argumentów instrukcji
 7.1. Proste instrukcje
@@ -2139,7 +2235,7 @@ Szkic:
 void os_op_mathvm(void) {
     mx_vm_t vm;
     uint8_t frame_buf[16 + 48*4 + 160];
-    uint16_t frame_len = xstack_pull_frame(frame_buf, sizeof(frame_buf)); // Twoja funkcja
+    uint16_t frame_len = xstack_pull_frame(frame_buf, sizeof(frame_buf)); // czyta najpierw header, potem resztę
 
     if (!mx_load_frame(&vm, frame_buf, frame_len)) {
         os_set_ax(vm.status, 0);
@@ -2153,7 +2249,8 @@ void os_op_mathvm(void) {
 
     // opcjonalne pakowanie wyniku do int16
     if (vm.hdr.flags & MX_FLAG_RETURN_I16) {
-        // v2: spakuj do out jako 2x int16 per word lub 1x int16 per word
+        // v1: każdy word wyniku zamieniany na jeden int16 zapisany w low 16 bitach worda,
+        // high 16 bitów = 0; X nadal oznacza liczbę wordów, nie liczbę bajtów
     }
 
     xstack_push_words((const uint32_t *)vm.out, vm.outc); // Twoja funkcja
@@ -2229,7 +2326,9 @@ Bajty:
 Tu warto wykorzystać to, że RIA ma 64 KB XRAM oraz dwa portale RW0/RW1 z auto-increment, co dobrze nadaje się do sekwencyjnego czytania i pisania buforów.
 16.1. Propozycja v2
 
-Dla count > 1:
+To jest wyraźnie poza zakresem v1.
+
+Dla count > 1 w v2:
 
     xram_in wskazuje pierwszy rekord wejściowy,
 
@@ -2245,13 +2344,13 @@ Na początek zrobiłbym dwa osobne tryby batch zamiast pełnej ogólności:
 
     SPR2L_BATCH
 
-To będzie prostsze i szybsze niż pełny ogólny VM loop w v1.
+To będzie prostsze i szybsze niż pełny ogólny VM loop.
 17. Minimalny pakowacz po stronie 6502 / hosta
 
 Jeśli składasz ramkę po stronie C hosta:
 
 typedef struct {
-    uint8_t data[256];
+    uint8_t data[16 + 48*4 + 160];
     uint16_t len;
 } mx_frame_builder_t;
 
@@ -2289,13 +2388,27 @@ for (int i = b.len - 1; i >= 0; --i) {
 Najkrótsza ścieżka do działającej wersji:
 v1
 
+    NOP
+
+    HALT
+
     RET
+
+    PUSHF
 
     LDS, LDV2, LDV3
 
+    DUP, DROP, SWAP
+
     FADD, FSUB, FMUL, FDIV, FMADD
 
+    FNEG, FABS
+
     FSIN, FCOS, FSQRT
+
+    FMIN, FMAX
+
+    FROUND, FTRUNC
 
     M3V3L
 
@@ -2342,10 +2455,10 @@ To jest dokładnie ten kompromis, który ma sens przy kosztownym mechanizmie wyw
 
 Mogę w następnym kroku rozpisać gotowy zestaw plików:
 
-    mathvm.h
+    src/mathvm/mathvm.h
 
-    mathvm_host.c
+    src/mathvm/mathvm_host.c
 
-    mathvm_ria.c
+    src/mathvm/mathvm_ria.c
 
     oraz przykładowy test mat3xvec3 i sprite_bbox.
