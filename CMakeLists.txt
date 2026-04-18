@@ -47,7 +47,7 @@ set(IPO_PRINTF_LINK_OPTIONS
 # For release, set version string and set code page to 0.
 set(RP6502_PROJECT_DEFINITIONS
     RP6502_NAME="Picocomputer 6502"
-    RP6502_VERSION="gogee 0.23[20260417.1536]mc+mathvm"
+    RP6502_VERSION="gogee 0.23[20260418.0400]mathvm"
     RP6502_CODE_PAGE=0
     RP6502_LOCALE="str_en.inc"
     RP6502_EXFAT=0

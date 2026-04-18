@@ -10,7 +10,6 @@
 #include "api/clk.h"
 #include "api/dir.h"
 #include "mathvm/mathvm.h"
-#include "api/mth.h"
 #include "api/oem.h"
 #include "api/pro.h"
 #include "api/std.h"
@@ -298,48 +297,6 @@ bool main_api(uint8_t operation)
         return dir_api_getlabel();
     case 0x2E:
         return dir_api_getfree();
-    case 0x30:
-        return mth_api_mul8();
-    case 0x31:
-        return mth_api_mul16();
-    case 0x32:
-        return mth_api_muls16();
-    case 0x33:
-        return mth_api_div16();
-    case 0x34:
-        return mth_api_sqrt32();
-    case 0x38:
-        return mth_api_fadd();
-    case 0x39:
-        return mth_api_fsub();
-    case 0x3A:
-        return mth_api_fmul();
-    case 0x3B:
-        return mth_api_fdiv();
-    case 0x3C:
-        return mth_api_fsqrt();
-    case 0x3D:
-        return mth_api_fsin();
-    case 0x3E:
-        return mth_api_fcos();
-    case 0x3F:
-        return mth_api_fatan2();
-    case 0x40:
-        return mth_api_fpow();
-    case 0x41:
-        return mth_api_flog();
-    case 0x42:
-        return mth_api_fexp();
-    case 0x43:
-        return mth_api_ftoi();
-    case 0x44:
-        return mth_api_itof();
-    case 0x48:
-        return mth_api_dadd();
-    case 0x49:
-        return mth_api_dmul();
-    case 0x4A:
-        return mth_api_ddiv();
     case RIA_OP_MATHVM:
         return mathvm_api_op();
     }

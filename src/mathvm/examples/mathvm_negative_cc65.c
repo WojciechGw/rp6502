@@ -22,18 +22,18 @@
 #define MX_LDS   0x12
 #define MX_DROP  0x19
 
-static void append_u8(uint8_t *frame, uint8_t *len, uint8_t value)
+static void append_u8(uint8_t *frame, uint16_t *len, uint8_t value)
 {
     frame[(*len)++] = value;
 }
 
-static void append_u16le(uint8_t *frame, uint8_t *len, uint16_t value)
+static void append_u16le(uint8_t *frame, uint16_t *len, uint16_t value)
 {
     frame[(*len)++] = (uint8_t)(value & 0xFFu);
     frame[(*len)++] = (uint8_t)(value >> 8);
 }
 
-static void append_u32le(uint8_t *frame, uint8_t *len, uint32_t value)
+static void append_u32le(uint8_t *frame, uint16_t *len, uint32_t value)
 {
     frame[(*len)++] = (uint8_t)(value & 0xFFu);
     frame[(*len)++] = (uint8_t)((value >> 8) & 0xFFu);
@@ -42,7 +42,7 @@ static void append_u32le(uint8_t *frame, uint8_t *len, uint32_t value)
 }
 
 static void append_header(uint8_t *frame,
-                          uint8_t *len,
+                          uint16_t *len,
                           uint8_t magic,
                           uint8_t version,
                           uint8_t flags,
@@ -66,9 +66,9 @@ static void append_header(uint8_t *frame,
     append_u16le(frame, len, 0x0000u);
 }
 
-static uint8_t build_bad_magic_frame(uint8_t *frame)
+static uint16_t build_bad_magic_frame(uint8_t *frame)
 {
-    uint8_t len = 0;
+    uint16_t len = 0;
 
     append_header(frame, &len, 0x00, 0x01, 0x00, 0x10, 0x02, 0x00, 0x00, 0x01);
     append_u8(frame, &len, MX_RET);
@@ -76,9 +76,9 @@ static uint8_t build_bad_magic_frame(uint8_t *frame)
     return len;
 }
 
-static uint8_t build_bad_header_frame(uint8_t *frame)
+static uint16_t build_bad_header_frame(uint8_t *frame)
 {
-    uint8_t len = 0;
+    uint16_t len = 0;
 
     append_header(frame, &len, 0x4D, 0x01, 0x00, 0x0F, 0x02, 0x00, 0x00, 0x01);
     append_u8(frame, &len, MX_RET);
@@ -86,9 +86,9 @@ static uint8_t build_bad_header_frame(uint8_t *frame)
     return len;
 }
 
-static uint8_t build_unsupported_flag_frame(uint8_t *frame)
+static uint16_t build_unsupported_flag_frame(uint8_t *frame)
 {
-    uint8_t len = 0;
+    uint16_t len = 0;
 
     append_header(frame, &len, 0x4D, 0x01, 0x10, 0x10, 0x02, 0x00, 0x00, 0x01);
     append_u8(frame, &len, MX_RET);
@@ -96,18 +96,18 @@ static uint8_t build_unsupported_flag_frame(uint8_t *frame)
     return len;
 }
 
-static uint8_t build_stack_underflow_frame(uint8_t *frame)
+static uint16_t build_stack_underflow_frame(uint8_t *frame)
 {
-    uint8_t len = 0;
+    uint16_t len = 0;
 
     append_header(frame, &len, 0x4D, 0x01, 0x00, 0x10, 0x01, 0x00, 0x00, 0x01);
     append_u8(frame, &len, MX_DROP);
     return len;
 }
 
-static uint8_t build_bad_local_frame(uint8_t *frame)
+static uint16_t build_bad_local_frame(uint8_t *frame)
 {
-    uint8_t len = 0;
+    uint16_t len = 0;
 
     append_header(frame, &len, 0x4D, 0x01, 0x00, 0x10, 0x02, 0x01, 0x01, 0x02);
     append_u32le(frame, &len, 0x42F60000UL);
@@ -117,11 +117,11 @@ static uint8_t build_bad_local_frame(uint8_t *frame)
 }
 
 static void run_case(const char *name,
-                     uint8_t (*build_frame)(uint8_t *),
+                     uint16_t (*build_frame)(uint8_t *),
                      uint8_t expected_status)
 {
     uint8_t frame[32];
-    uint8_t frame_len;
+    uint16_t frame_len;
     mx_client_result_t call;
 
     frame_len = build_frame(frame);

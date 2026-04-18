@@ -2,7 +2,9 @@
  * MATHVM Math Coprocessor Test
  *
  * Based on rp6502_examples/src/MTHexamples/mathcop.c, but runs the checks
- * through OS $80 and MATHVM bytecode instead of the legacy scalar mth API.
+ * through OS $80 and MATHVM bytecode.
+ *
+ * This file no longer depends on the detached legacy mth backend.
  */
 
 #include "mathvm_client.h"
@@ -26,18 +28,18 @@
 static unsigned int passed;
 static unsigned int failed;
 
-static void append_u8(uint8_t *frame, uint8_t *len, uint8_t value)
+static void append_u8(uint8_t *frame, uint16_t *len, uint8_t value)
 {
     frame[(*len)++] = value;
 }
 
-static void append_u16le(uint8_t *frame, uint8_t *len, uint16_t value)
+static void append_u16le(uint8_t *frame, uint16_t *len, uint16_t value)
 {
     frame[(*len)++] = (uint8_t)(value & 0xFFu);
     frame[(*len)++] = (uint8_t)(value >> 8);
 }
 
-static void append_u32le(uint8_t *frame, uint8_t *len, uint32_t value)
+static void append_u32le(uint8_t *frame, uint16_t *len, uint32_t value)
 {
     frame[(*len)++] = (uint8_t)(value & 0xFFu);
     frame[(*len)++] = (uint8_t)((value >> 8) & 0xFFu);
@@ -46,7 +48,7 @@ static void append_u32le(uint8_t *frame, uint8_t *len, uint32_t value)
 }
 
 static void append_header(uint8_t *frame,
-                          uint8_t *len,
+                          uint16_t *len,
                           uint8_t prog_len,
                           uint8_t out_words,
                           uint8_t stack_words)
@@ -68,7 +70,7 @@ static void append_header(uint8_t *frame,
 static mx_client_result_t run_unary_u32(uint8_t op, uint32_t arg, mx_word_t *out)
 {
     uint8_t frame[32];
-    uint8_t len = 0;
+    uint16_t len = 0;
 
     append_header(frame, &len, 8u, 1u, 4u);
     append_u8(frame, &len, MX_PUSHI);
@@ -83,7 +85,7 @@ static mx_client_result_t run_unary_u32(uint8_t op, uint32_t arg, mx_word_t *out
 static mx_client_result_t run_binary_u32(uint8_t op, uint32_t a, uint32_t b, mx_word_t *out)
 {
     uint8_t frame[40];
-    uint8_t len = 0;
+    uint16_t len = 0;
 
     append_header(frame, &len, 13u, 1u, 4u);
     append_u8(frame, &len, MX_PUSHI);
@@ -100,7 +102,7 @@ static mx_client_result_t run_binary_u32(uint8_t op, uint32_t a, uint32_t b, mx_
 static mx_client_result_t run_unary_f32(uint8_t op, uint32_t arg_bits, mx_word_t *out)
 {
     uint8_t frame[32];
-    uint8_t len = 0;
+    uint16_t len = 0;
 
     append_header(frame, &len, 8u, 1u, 4u);
     append_u8(frame, &len, MX_PUSHF);
@@ -115,7 +117,7 @@ static mx_client_result_t run_unary_f32(uint8_t op, uint32_t arg_bits, mx_word_t
 static mx_client_result_t run_binary_f32(uint8_t op, uint32_t a_bits, uint32_t b_bits, mx_word_t *out)
 {
     uint8_t frame[40];
-    uint8_t len = 0;
+    uint16_t len = 0;
 
     append_header(frame, &len, 13u, 1u, 4u);
     append_u8(frame, &len, MX_PUSHF);
@@ -137,7 +139,7 @@ static mx_client_result_t run_binary_d64(uint8_t op,
                                          mx_word_t *out)
 {
     uint8_t frame[64];
-    uint8_t len = 0;
+    uint16_t len = 0;
 
     append_header(frame, &len, 23u, 2u, 8u);
     append_u8(frame, &len, MX_PUSHI);
@@ -158,7 +160,7 @@ static mx_client_result_t run_binary_d64(uint8_t op,
 static long mathvm_sin10000(int deg)
 {
     uint8_t frame[64];
-    uint8_t len = 0;
+    uint16_t len = 0;
     mx_word_t out[1];
     mx_client_result_t call;
 
@@ -186,7 +188,7 @@ static long mathvm_sin10000(int deg)
 static long mathvm_cos10000(int deg)
 {
     uint8_t frame[64];
-    uint8_t len = 0;
+    uint16_t len = 0;
     mx_word_t out[1];
     mx_client_result_t call;
 
@@ -255,6 +257,7 @@ static void benchmark_sine(void)
     clock_t t_start;
     clock_t t_vm;
     clock_t t_cpu;
+    unsigned long ratio_tenths;
     int i;
     long dummy = 0;
 
@@ -275,7 +278,11 @@ static void benchmark_sine(void)
     printf("CPU Bhaskara : %lu ms\n",
            (unsigned long)t_cpu * 1000UL / (unsigned long)CLOCKS_PER_SEC);
     if (t_vm > 0)
-        printf("CPU/MATHVM ratio: %lux\n", (unsigned long)(t_cpu / t_vm));
+    {
+        ratio_tenths = ((unsigned long)t_cpu * 10UL + (unsigned long)t_vm / 2UL) /
+                       (unsigned long)t_vm;
+        printf("CPU/MATHVM ratio: %lu.%lux\n", ratio_tenths / 10UL, ratio_tenths % 10UL);
+    }
     (void)dummy;
 }
 
@@ -284,6 +291,7 @@ static void benchmark_cosine(void)
     clock_t t_start;
     clock_t t_vm;
     clock_t t_cpu;
+    unsigned long ratio_tenths;
     int i;
     long dummy = 0;
 
@@ -304,7 +312,11 @@ static void benchmark_cosine(void)
     printf("CPU Bhaskara : %lu ms\n",
            (unsigned long)t_cpu * 1000UL / (unsigned long)CLOCKS_PER_SEC);
     if (t_vm > 0)
-        printf("CPU/MATHVM ratio: %lux\n", (unsigned long)(t_cpu / t_vm));
+    {
+        ratio_tenths = ((unsigned long)t_cpu * 10UL + (unsigned long)t_vm / 2UL) /
+                       (unsigned long)t_vm;
+        printf("CPU/MATHVM ratio: %lu.%lux\n", ratio_tenths / 10UL, ratio_tenths % 10UL);
+    }
     (void)dummy;
 }
 

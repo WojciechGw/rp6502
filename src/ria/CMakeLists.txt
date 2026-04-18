@@ -64,7 +64,6 @@ target_sources(${RIA_TARGET} PRIVATE
     api/dir.c
     ../mathvm/mathvm_host.c
     ../mathvm/mathvm_ria.c
-    api/mth.c
     api/oem.c
     api/pro.c
     api/std.c

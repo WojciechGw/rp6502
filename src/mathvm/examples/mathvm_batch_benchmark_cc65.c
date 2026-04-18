@@ -2,7 +2,7 @@
  * MATHVM batch benchmark.
  *
  * Compares:
- *   1. Many scalar RPC calls to the legacy mth API
+ *   1. Pure CPU integer approximation
  *   2. One MATHVM call with an internal bytecode loop
  *
  * The benchmark computes:
@@ -23,11 +23,17 @@
 #define RIA_SREG_LO  (*(volatile uint8_t *)0xFFF8)
 #define RIA_SREG_HI  (*(volatile uint8_t *)0xFFF9)
 
+/*
+ * Legacy scalar mth opcodes are intentionally left commented out.
+ * The old mth backend is no longer linked into firmware, so this benchmark
+ * now compares pure CPU code against a single MATHVM call.
+ *
 #define MTH_FADD     0x38
 #define MTH_FMUL     0x3A
 #define MTH_FSIN     0x3D
 #define MTH_FCOS     0x3E
 #define MTH_ITOF     0x44
+ */
 
 #define F32_0_0          0x00000000UL
 #define F32_1_0          0x3F800000UL
@@ -84,6 +90,7 @@ static uint32_t call_u32(uint8_t op)
            ((uint32_t)RIA_SREG_HI << 24);
 }
 
+/*
 static uint32_t scalar_itof(int value)
 {
     set_axsreg_u32((uint32_t)value);
@@ -132,6 +139,7 @@ static uint32_t scalar_sum_trig10000(uint8_t trig_op)
 
     return sum;
 }
+*/
 
 static long bhaskara_sin10000(int deg)
 {
@@ -240,10 +248,8 @@ static void benchmark_one(const char *name, uint8_t trig_op)
 {
     clock_t t0;
     clock_t t_cpu;
-    clock_t t_scalar;
     clock_t t_mathvm;
     long cpu_sum;
-    uint32_t scalar_sum;
     uint32_t mathvm_sum;
 
     puts("");
@@ -254,28 +260,18 @@ static void benchmark_one(const char *name, uint8_t trig_op)
     t_cpu = clock() - t0;
 
     t0 = clock();
-    scalar_sum = scalar_sum_trig10000(trig_op);
-    t_scalar = clock() - t0;
-
-    t0 = clock();
     mathvm_sum = mathvm_sum_trig10000(trig_op);
     t_mathvm = clock() - t0;
 
     printf("pure CPU      : %lu ms\n",
            (unsigned long)t_cpu * 1000UL / (unsigned long)CLOCKS_PER_SEC);
-    printf("scalar mth RPC : %lu ms\n",
-           (unsigned long)t_scalar * 1000UL / (unsigned long)CLOCKS_PER_SEC);
     printf("one MATHVM call: %lu ms\n",
            (unsigned long)t_mathvm * 1000UL / (unsigned long)CLOCKS_PER_SEC);
     printf("CPU sum (x10000): %ld\n", cpu_sum);
-    printf("scalar sum bits: %08lX\n", (unsigned long)scalar_sum);
     printf("MATHVM sum bits: %08lX\n", (unsigned long)mathvm_sum);
 
     if (t_mathvm > 0)
-    {
-        printf("scalar/MATHVM ratio: %lux\n", (unsigned long)(t_scalar / t_mathvm));
         printf("CPU/MATHVM ratio   : %lux\n", (unsigned long)(t_cpu / t_mathvm));
-    }
 }
 
 int main(void)

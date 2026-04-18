@@ -1286,7 +1286,7 @@ Przyjmuję jeden numer operacji OS:
 
 #define RIA_OP_MATHVM 0x80
 
-To jest tymczasowa decyzja projektowa dla MATHVM v1, żeby nie kolidować z istniejącym `mth`.
+To jest finalna decyzja projektowa dla `MATHVM`: `OS code` pozostaje pod `$80`.
 1.3. Jednostka danych VM
 
 Podstawową komórką VM jest:

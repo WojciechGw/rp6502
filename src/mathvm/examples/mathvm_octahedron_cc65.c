@@ -1,8 +1,8 @@
 /*
- * MATHVM batch dodecahedron animation.
+ * MATHVM octahedron animation.
  *
- * One MATHVM call per frame projects all 20 vertices of a regular
- * dodecahedron from XRAM input records to packed int16 x/y output records.
+ * One MATHVM batch call per frame projects all 6 vertices of a regular
+ * octahedron from XRAM input records to packed int16 x/y output records.
  *
  * SPDX-License-Identifier: BSD-3-Clause
  * SPDX-License-Identifier: Unlicense
@@ -28,52 +28,33 @@
 #define FB_B       0x7080u
 #define CFG_ADDR   0xFF00u
 
-#define CX  320
-#define CY  180
+#define XRAM_VERT_IN 0xE100u
 
-#define XRAM_VERT_IN   0xE100u
+#define OCTA_VERTS 6
+#define OCTA_EDGES 12
 
-#define DODECA_VERTS 20
-#define DODECA_EDGES 30
-
-static const mx_vec3i_t verts[DODECA_VERTS] = {
-    {-28, -28, -28},
-    { 28, -28, -28},
-    { 28,  28, -28},
-    {-28,  28, -28},
-    {-28, -28,  28},
-    { 28, -28,  28},
-    { 28,  28,  28},
-    {-28,  28,  28},
-    {  0, -17, -45},
-    {  0,  17, -45},
-    {  0, -17,  45},
-    {  0,  17,  45},
-    {-17, -45,   0},
-    { 17, -45,   0},
-    {-17,  45,   0},
-    { 17,  45,   0},
-    {-45,   0, -17},
-    { 45,   0, -17},
-    {-45,   0,  17},
-    { 45,   0,  17},
+static const mx_vec3i_t verts[OCTA_VERTS] = {
+    {  0,  56,   0 },
+    { 56,   0,   0 },
+    {  0,   0,  56 },
+    {-56,   0,   0 },
+    {  0,   0, -56 },
+    {  0, -56,   0 },
 };
 
-static const unsigned char edges[DODECA_EDGES][2] = {
-    {0,8}, {0,12}, {0,16}, {1,8}, {1,13}, {1,17},
-    {2,9}, {2,15}, {2,17}, {3,9}, {3,14}, {3,16},
-    {4,10}, {4,12}, {4,18}, {5,10}, {5,13}, {5,19},
-    {6,11}, {6,15}, {6,19}, {7,11}, {7,14}, {7,18},
-    {8,9}, {10,11}, {12,13}, {14,15}, {16,18}, {17,19},
+static const unsigned char edges[OCTA_EDGES][2] = {
+    {0,1}, {0,2}, {0,3}, {0,4},
+    {5,1}, {5,2}, {5,3}, {5,4},
+    {1,2}, {2,3}, {3,4}, {4,1},
 };
 
 static const unsigned char bitmask[8] = {
     0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01
 };
 
-static int proj_x[DODECA_VERTS];
-static int proj_y[DODECA_VERTS];
-static mx_point2i_t proj_points[DODECA_VERTS];
+static int proj_x[OCTA_VERTS];
+static int proj_y[OCTA_VERTS];
+static mx_point2i_t proj_points[OCTA_VERTS];
 static unsigned back_buf;
 
 static bool key_down(unsigned char code)
@@ -184,11 +165,11 @@ static bool project_vertices(int angle)
                                                 XRAM_VERT_IN,
                                                 verts,
                                                 proj_points,
-                                                DODECA_VERTS);
+                                                OCTA_VERTS);
     if (call.status != MX_OK || call.out_words != 0u)
         return false;
 
-    for (i = 0; i < DODECA_VERTS; ++i)
+    for (i = 0; i < OCTA_VERTS; ++i)
     {
         proj_x[i] = (int)proj_points[i].x;
         proj_y[i] = (int)proj_points[i].y;
@@ -233,12 +214,12 @@ void main(void)
             break;
 
         RIA.step0 = 0;
-        for (e = 0; e < DODECA_VERTS; ++e)
+        for (e = 0; e < OCTA_VERTS; ++e)
             set_pixel(proj_x[e], proj_y[e]);
 
         if (angle < 180)
         {
-            for (e = 0; e < DODECA_EDGES; ++e)
+            for (e = 0; e < OCTA_EDGES; ++e)
             {
                 int ax = proj_x[edges[e][0]];
                 int ay = proj_y[edges[e][0]];
