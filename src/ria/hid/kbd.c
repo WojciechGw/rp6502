@@ -221,8 +221,7 @@ static void kbd_queue_key(uint8_t modifier, uint8_t keycode, bool initial_press)
     // Set up for repeat
     kbd_repeat_modifier = modifier;
     kbd_repeat_keycode = keycode;
-    kbd_repeat_timer = delayed_by_us(get_absolute_time(),
-                                     initial_press ? KBD_REPEAT_DELAY : KBD_REPEAT_RATE);
+    kbd_repeat_timer = make_timeout_time_us(initial_press ? KBD_REPEAT_DELAY : KBD_REPEAT_RATE);
     // When not in numlock, and not shifted, remap num pad
     if (keycode >= HID_KEY_KEYPAD_1 &&
         keycode <= HID_KEY_KEYPAD_DECIMAL &&
@@ -584,7 +583,7 @@ void kbd_init(void)
 
 void kbd_task(void)
 {
-    if (kbd_repeat_keycode && absolute_time_diff_us(get_absolute_time(), kbd_repeat_timer) < 0)
+    if (kbd_repeat_keycode && time_reached(kbd_repeat_timer))
     {
         if (KBD_KEY_BIT_VAL(kbd_keys, kbd_repeat_keycode) &&
             KBD_MODIFIER(kbd_keys) == kbd_repeat_modifier)
