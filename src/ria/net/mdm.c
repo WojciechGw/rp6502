@@ -65,6 +65,7 @@ typedef enum
     mdm_state_wait,
     mdm_state_dialing,
     mdm_state_connected,
+    mdm_state_disconnecting,
 } mdm_state_t;
 
 typedef struct
@@ -624,14 +625,26 @@ bool mdm_hangup(void)
     return false;
 }
 
+static void mdm_finalize_carrier_lost(void)
+{
+    mdm_hangup();
+    mdm_set_response_fn(mdm_response_code, 3); // NO CARRIER
+}
+
 void mdm_carrier_lost(void)
 {
-    if (mdm_conn->state != mdm_state_on_hook)
+    if (mdm_conn->state == mdm_state_on_hook)
+        return;
+    DBG("NET MDM carrier lost\n");
+    // Remote FIN while DTE is in data mode: defer NO CARRIER until
+    // mdm_std_read has drained net's buffered pbufs. net is already in
+    // net_state_closing and will self-close on drain.
+    if (mdm_conn->state == mdm_state_connected && !mdm_conn->in_command_mode)
     {
-        DBG("NET MDM carrier lost\n");
-        mdm_hangup();
-        mdm_set_response_fn(mdm_response_code, 3); // NO CARRIER
+        mdm_conn->state = mdm_state_disconnecting;
+        return;
     }
+    mdm_finalize_carrier_lost();
 }
 
 bool mdm_conns_is_open(int desc)
@@ -827,9 +840,14 @@ void mdm_task()
             mdm_conn->escape_count = 0;
             if (!mdm_conn->in_command_mode)
             {
-                mdm_conn->in_command_mode = true;
                 mdm_conn->cmd_buf_len = 0;
-                mdm_set_response_fn(mdm_response_code, 0); // OK
+                if (mdm_conn->state == mdm_state_disconnecting)
+                    mdm_finalize_carrier_lost();
+                else
+                {
+                    mdm_conn->in_command_mode = true;
+                    mdm_set_response_fn(mdm_response_code, 0); // OK
+                }
             }
         }
     }
@@ -1010,7 +1028,14 @@ std_rw_result mdm_std_read(int desc, char *buf, uint32_t count, uint32_t *bytes_
         else if (!mdm_conn->in_command_mode)
         {
             // Read from telephone connection in data mode
-            pos += tel_rx(mdm_desc(), &buf[pos], (uint16_t)(count - pos));
+            uint16_t got = tel_rx(mdm_desc(), &buf[pos], (uint16_t)(count - pos));
+            pos += got;
+            if (got == 0 && mdm_conn->state == mdm_state_disconnecting)
+            {
+                // Buffered RX drained after remote FIN; emit NO CARRIER now.
+                mdm_finalize_carrier_lost();
+                continue;
+            }
             break;
         }
         else
