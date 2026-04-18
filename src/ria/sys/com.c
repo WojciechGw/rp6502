@@ -5,14 +5,16 @@
  */
 
 #include "main.h"
-#include "api/api.h"
 #include "aud/bel.h"
 #include "hid/kbd.h"
 #include "sys/com.h"
+#include "sys/mem.h"
 #include "sys/pix.h"
+#include "net/tel.h"
 #include "sys/vga.h"
 #include <pico/stdlib.h>
 #include <pico/stdio/driver.h>
+#include <hardware/sync.h>
 
 #if defined(DEBUG_RIA_SYS) || defined(DEBUG_RIA_SYS_COM)
 #include <stdio.h>
@@ -23,184 +25,228 @@ static inline void DBG(const char *fmt, ...) { (void)fmt; }
 
 static bool com_bel_enabled = true;
 
-static stdio_driver_t com_stdio_driver;
+/* TX — fan-out input buffers (drained by com_tx_fanout into UART + TEL).
+ * com_tx_buf holds core-0 output (stdio, std_tty_write).
+ * com_act_tx_buf holds core-1 act_loop output (6502 writes to 0xFFE1).
+ */
 
-volatile size_t com_tx_tail;
-volatile size_t com_tx_head;
 volatile uint8_t com_tx_buf[COM_TX_BUF_SIZE];
+volatile size_t com_tx_head;
+volatile size_t com_tx_tail;
 
-#define COM_RX_BUF_SIZE 32
-static size_t com_rx_tail;
-static size_t com_rx_head;
-static uint8_t com_rx_buf[COM_RX_BUF_SIZE];
-volatile int com_rx_char;
+volatile uint8_t com_act_tx_buf[COM_ACT_TX_BUF_SIZE];
+volatile size_t com_act_tx_head;
+volatile size_t com_act_tx_tail;
 
-static int com_rx_buf_getchar(void)
+/* TX — UART output buffer (internal)
+ */
+
+#define COM_UART_BUF_SIZE 32
+static volatile size_t com_uart_tail;
+static volatile size_t com_uart_head;
+static volatile uint8_t com_uart_buf[COM_UART_BUF_SIZE];
+
+static bool com_uart_writable(void)
 {
-    if (com_rx_head != com_rx_tail)
-    {
-        com_rx_tail = (com_rx_tail + 1) % COM_RX_BUF_SIZE;
-        return com_rx_buf[com_rx_tail];
-    }
-    return -1;
+    return (((com_uart_head + 1) % COM_UART_BUF_SIZE) != com_uart_tail);
 }
 
-static void com_clear_all_rx()
+static void com_uart_write(char ch)
 {
-    com_rx_char = -1;
-    com_rx_tail = com_rx_head = 0;
+    size_t next = (com_uart_head + 1) % COM_UART_BUF_SIZE;
+    com_uart_buf[next] = (uint8_t)ch;
+    com_uart_head = next;
 }
 
-static void com_tx_task(void)
+static void com_uart_task(void)
 {
     if (vga_connected())
     {
         // Use TXFE (empty) to pace VGA PIX sends
-        while (com_tx_head != com_tx_tail &&
+        while (com_uart_head != com_uart_tail &&
                uart_get_hw(COM_UART)->fr & UART_UARTFR_TXFE_BITS &&
                pix_ready())
         {
-            com_tx_tail = (com_tx_tail + 1) % COM_TX_BUF_SIZE;
-            char ch = com_tx_buf[com_tx_tail];
+            size_t next = (com_uart_tail + 1) % COM_UART_BUF_SIZE;
+            char ch = com_uart_buf[next];
             uart_putc_raw(COM_UART, ch);
             pix_send(PIX_DEVICE_VGA, 0xF, 0x03, ch);
             if (ch == '\a' && com_bel_enabled)
                 bel_add(&bel_teletype);
+            com_uart_tail = next;
         }
     }
     else
     {
         // Fill UART TX FIFO
-        while (com_tx_head != com_tx_tail &&
+        while (com_uart_head != com_uart_tail &&
                !(uart_get_hw(COM_UART)->fr & UART_UARTFR_TXFF_BITS))
         {
-            com_tx_tail = (com_tx_tail + 1) % COM_TX_BUF_SIZE;
-            char ch = com_tx_buf[com_tx_tail];
+            size_t next = (com_uart_tail + 1) % COM_UART_BUF_SIZE;
+            char ch = com_uart_buf[next];
             uart_putc_raw(COM_UART, ch);
             if (ch == '\a' && com_bel_enabled)
                 bel_add(&bel_teletype);
+            com_uart_tail = next;
         }
     }
 }
 
-static int com_rx_task(char *buf, int length)
+// Fan out both TX rings into UART and REM buffers. One char per source
+// per pass so the core-0 and core-1 streams interleave instead of one
+// starving the other. __dmb() on the act_loop side pairs with the DMB
+// in com_act_write() so we never read a slot whose store hasn't landed.
+static void com_tx_fanout(void)
 {
-    // To avoid crossing the streams, we wait for a 1ms
-    // pause on the UART before injecting keystrokes, then
-    // keyboard buffer is emptied before returning to UART.
-    static bool in_keyboard = false;
-    static const int COM_STDIO_UART_PAUSE_US = 1000;
-    static absolute_time_t com_stdio_uart_timer;
+    while (com_uart_writable() && tel_tx_writable())
+    {
+        bool work = false;
+        if (com_tx_head != com_tx_tail)
+        {
+            size_t next = (com_tx_tail + 1) % COM_TX_BUF_SIZE;
+            char ch = com_tx_buf[next];
+            com_uart_write(ch);
+            tel_tx_write(ch);
+            com_tx_tail = next;
+            work = true;
+            if (!com_uart_writable() || !tel_tx_writable())
+                break;
+        }
+        if (com_act_tx_head != com_act_tx_tail)
+        {
+            size_t next = (com_act_tx_tail + 1) % COM_ACT_TX_BUF_SIZE;
+            char ch = com_act_tx_buf[next];
+            com_uart_write(ch);
+            tel_tx_write(ch);
+            __dmb();
+            com_act_tx_tail = next;
+            work = true;
+        }
+        if (!work)
+            break;
+    }
+}
 
-    if (in_keyboard || absolute_time_diff_us(get_absolute_time(), com_stdio_uart_timer) < 0)
+static void com_uart_flush(void)
+{
+    while (com_uart_head != com_uart_tail)
+        com_uart_task();
+    while (uart_get_hw(COM_UART)->fr & UART_UARTFR_BUSY_BITS)
+        tight_loop_contents();
+}
+
+/* RX — merged input buffer (core-0 internal) plus the single-char
+ * cross-core handoff slot com_rx_char. com_task drains com_rx_merge
+ * into com_rx_buf, then refills com_rx_char from the ring when empty.
+ * act_loop reads com_rx_char to serve 6502 0xFFE2 reads; the stdio
+ * path steals from it when the monitor is the active consumer.
+ */
+
+#define COM_RX_BUF_SIZE 32
+static size_t com_rx_head;
+static size_t com_rx_tail;
+static uint8_t com_rx_buf[COM_RX_BUF_SIZE];
+
+volatile int com_rx_char = -1;
+
+static int com_rx_buf_getchar(void)
+{
+    if (com_rx_head == com_rx_tail)
+        return -1;
+    size_t next = (com_rx_tail + 1) % COM_RX_BUF_SIZE;
+    int ch = com_rx_buf[next];
+    com_rx_tail = next;
+    return ch;
+}
+
+// Sticky multiplex: current source holds the lock until idle for 1ms.
+// Keyboard is the exception, releasing immediately when empty.
+static int com_rx_merge(char *buf, int length)
+{
+    static const int COM_IDLE_US = 1000;
+    enum source
+    {
+        SRC_NONE,
+        SRC_KBD,
+        SRC_UART,
+        SRC_TEL
+    };
+    static enum source source = SRC_NONE;
+    static absolute_time_t idle_timer;
+
+    // Expire UART/TEL source once idle for 1ms
+    if ((source == SRC_UART || source == SRC_TEL) &&
+        time_reached(idle_timer))
+        source = SRC_NONE;
+
+    if (source == SRC_KBD || source == SRC_NONE)
     {
         int i = kbd_stdio_in_chars(buf, length);
         if (i != PICO_ERROR_NO_DATA)
         {
-            in_keyboard = true;
+            source = SRC_KBD;
             return i;
         }
-        in_keyboard = false;
+        if (source == SRC_KBD)
+            source = SRC_NONE;
     }
 
-    // Get char from UART
-    int count = 0;
-    bool readable = uart_is_readable(COM_UART);
-    if (readable)
-        com_stdio_uart_timer = make_timeout_time_us(COM_STDIO_UART_PAUSE_US);
-    while (readable && count < length)
+    if (source == SRC_UART || source == SRC_NONE)
     {
-        buf[count++] = (uint8_t)uart_get_hw(COM_UART)->dr;
-        readable = uart_is_readable(COM_UART);
+        int count = 0;
+        while (uart_is_readable(COM_UART) && count < length)
+            buf[count++] = (uint8_t)uart_get_hw(COM_UART)->dr;
+        if (count)
+        {
+            source = SRC_UART;
+            idle_timer = make_timeout_time_us(COM_IDLE_US);
+            return count;
+        }
+        if (source == SRC_UART)
+            return PICO_ERROR_NO_DATA;
     }
 
-    return count ? count : PICO_ERROR_NO_DATA;
-}
-
-void com_init(void)
-{
-    gpio_set_function(COM_UART_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(COM_UART_RX_PIN, GPIO_FUNC_UART);
-    stdio_set_driver_enabled(&com_stdio_driver, true);
-    uart_init(COM_UART, COM_UART_BAUD_RATE);
-    com_clear_all_rx();
-    // Wait for the UART to settle then purge everything.
-    // If we leave garbage then there is a chance for
-    // no startup message because break clears it or
-    // VGA detection will fail to detect.
-    busy_wait_ms(5); // 2 fails, 3 works, 5 for safety
-    while (stdio_getchar_timeout_us(0) != PICO_ERROR_TIMEOUT)
-        tight_loop_contents();
-    hw_clear_bits(&uart_get_hw(COM_UART)->rsr, UART_UARTRSR_BITS);
-}
-
-void com_run()
-{
-    com_clear_all_rx();
-}
-
-void com_stop()
-{
-    com_clear_all_rx();
-}
-
-bool com_get_bel(void)
-{
-    return com_bel_enabled;
-}
-
-void com_set_bel(bool value)
-{
-    com_bel_enabled = value;
-}
-
-void com_task(void)
-{
-    // Process transmit.
-    com_tx_task();
-
-    // Move char into ria action loop.
-    if (com_rx_char < 0)
-        com_rx_char = com_rx_buf_getchar();
-
-    // Process receive. UART doesn't detect breaks when FIFO is full
-    // so we keep it drained and discard overruns like the UART would.
-    char ch;
-    while (com_rx_task(&ch, 1) == 1)
-        if (((com_rx_head + 1) % COM_RX_BUF_SIZE) != com_rx_tail)
+    if (source == SRC_TEL || source == SRC_NONE)
+    {
+        int i = tel_read(buf, length);
+        if (i != PICO_ERROR_NO_DATA)
         {
-            com_rx_head = (com_rx_head + 1) % COM_RX_BUF_SIZE;
-            com_rx_buf[com_rx_head] = ch;
+            source = SRC_TEL;
+            idle_timer = make_timeout_time_us(COM_IDLE_US);
+            return i;
         }
+    }
 
-    // Detect UART breaks.
-    static uint32_t break_detect = 0;
-    uint32_t current_break = uart_get_hw(COM_UART)->rsr & UART_UARTRSR_BE_BITS;
-    if (current_break)
-        hw_clear_bits(&uart_get_hw(COM_UART)->rsr, UART_UARTRSR_BITS);
-    else if (break_detect)
-        main_break();
-    break_detect = current_break;
+    return PICO_ERROR_NO_DATA;
 }
+
+/* stdio driver
+ */
 
 static void com_stdio_out_chars(const char *buf, int len)
 {
     while (len--)
     {
-        // Wait for room in buffer before we add next char
-        while ((com_tx_head + 1) % COM_TX_BUF_SIZE == com_tx_tail)
-            com_tx_task();
-        com_tx_head = (com_tx_head + 1) % COM_TX_BUF_SIZE;
-        com_tx_buf[com_tx_head] = *buf++;
+        while (!com_writable())
+        {
+            com_tx_fanout();
+            com_uart_task();
+            tel_pump();
+        }
+        com_write(*buf++);
     }
 }
 
 static void com_stdio_out_flush(void)
 {
     while (com_tx_head != com_tx_tail)
-        com_tx_task();
-    while (uart_get_hw(COM_UART)->fr & UART_UARTFR_BUSY_BITS)
-        tight_loop_contents();
+    {
+        com_tx_fanout();
+        com_uart_task();
+        tel_pump();
+    }
+    com_uart_flush();
+    tel_flush();
 }
 
 static int com_stdio_in_chars(char *buf, int length)
@@ -210,23 +256,19 @@ static int com_stdio_in_chars(char *buf, int length)
     // Take char from RIA register
     if (count < length && REGS(0xFFE0) & 0b01000000)
     {
-        // Mixing RIA register input with read() calls isn't perfect,
-        // should be considered undefined behavior, and is discouraged.
         buf[count++] = REGS(0xFFE2);
-        // Replace char with ASCII NUL and clear both ready bits
         REGS(0xFFE2) = 0;
         REGS(0xFFE0) = 0;
     }
 
-    // Take char from ria.c action loop queue
+    // Steal the cross-core handoff slot if the 6502 hasn't consumed it
     if (count < length && com_rx_char >= 0)
     {
-        int ch = com_rx_char;
+        buf[count++] = com_rx_char;
         com_rx_char = -1;
-        buf[count++] = ch;
     }
 
-    // Take from the circular buffer
+    // Drain the core-0 ring
     while (count < length)
     {
         int ch = com_rx_buf_getchar();
@@ -235,8 +277,8 @@ static int com_stdio_in_chars(char *buf, int length)
         buf[count++] = ch;
     }
 
-    // Pick up new chars from uart or keyboard
-    int x = com_rx_task(&buf[count], length - count);
+    // Pick up new chars
+    int x = com_rx_merge(&buf[count], length - count);
     if (x != PICO_ERROR_NO_DATA)
         count += x;
 
@@ -249,3 +291,76 @@ static stdio_driver_t com_stdio_driver = {
     .in_chars = com_stdio_in_chars,
     .crlf_enabled = true,
 };
+
+/* Main events
+ */
+
+void com_init(void)
+{
+    gpio_set_function(COM_UART_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(COM_UART_RX_PIN, GPIO_FUNC_UART);
+    stdio_set_driver_enabled(&com_stdio_driver, true);
+    uart_init(COM_UART, COM_UART_BAUD_RATE);
+    // Wait for the UART to settle then purge everything.
+    // If we leave garbage then there is a chance for
+    // no startup message because break clears it or
+    // VGA detection will fail to detect.
+    busy_wait_ms(5); // 2 fails, 3 works, 5 for safety
+    while (stdio_getchar_timeout_us(0) != PICO_ERROR_TIMEOUT)
+        tight_loop_contents();
+    hw_clear_bits(&uart_get_hw(COM_UART)->rsr, UART_UARTRSR_BITS);
+}
+
+void com_task(void)
+{
+    // TX: drain UART buffer to hardware
+    com_uart_task();
+
+    // TX: fan out com_tx_buf into UART and REM buffers
+    com_tx_fanout();
+
+    // RX: refill the cross-core handoff slot from the ring. __dmb()
+    // publishes the slot value before act_loop on core 1 can observe it.
+    if (com_rx_char < 0)
+    {
+        int ch = com_rx_buf_getchar();
+        if (ch >= 0)
+        {
+            __dmb();
+            com_rx_char = ch;
+        }
+    }
+
+    // RX: merge sources into com_rx_buf.
+    // UART doesn't detect breaks when FIFO is full
+    // so we keep it drained and discard overruns like the UART would.
+    char ch;
+    while (com_rx_merge(&ch, 1) == 1)
+    {
+        size_t next = (com_rx_head + 1) % COM_RX_BUF_SIZE;
+        if (next != com_rx_tail)
+        {
+            com_rx_buf[next] = (uint8_t)ch;
+            com_rx_head = next;
+        }
+    }
+
+    // Detect UART breaks.
+    static uint32_t break_detect = 0;
+    uint32_t current_break = uart_get_hw(COM_UART)->rsr & UART_UARTRSR_BE_BITS;
+    if (current_break)
+        hw_clear_bits(&uart_get_hw(COM_UART)->rsr, UART_UARTRSR_BITS);
+    else if (break_detect)
+        main_break();
+    break_detect = current_break;
+}
+
+bool com_get_bel(void)
+{
+    return com_bel_enabled;
+}
+
+void com_set_bel(bool value)
+{
+    com_bel_enabled = value;
+}

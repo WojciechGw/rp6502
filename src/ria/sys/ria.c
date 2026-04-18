@@ -64,9 +64,8 @@ void ria_run(void)
     action_result = RIA_ACTION_RESULT_NONE;
     saved_reset_vec = REGSW(0xFFFC);
     REGSW(0xFFFC) = 0xFFF0;
-    action_watchdog_timer = delayed_by_us(get_absolute_time(),
-                                          cpu_get_reset_us() +
-                                              RIA_WATCHDOG_MS * 1000);
+    action_watchdog_timer = make_timeout_time_us(cpu_get_reset_us() +
+                                                 RIA_WATCHDOG_MS * 1000);
     switch (action_state)
     {
     case action_state_write:
@@ -124,8 +123,7 @@ void ria_task(void)
     // check on watchdog unless we explicitly ended or errored
     if (ria_active() && action_result == RIA_ACTION_RESULT_NONE)
     {
-        absolute_time_t now = get_absolute_time();
-        if (absolute_time_diff_us(now, action_watchdog_timer) < 0)
+        if (time_reached(action_watchdog_timer))
         {
             action_result = RIA_ACTION_RESULT_TIMEOUT;
             main_stop();
@@ -351,7 +349,7 @@ __attribute__((optimize("O3"))) static void __no_inline_not_in_flash_func(act_lo
                     int ch = com_rx_char;
                     if (ch >= 0)
                     {
-                        REGS(0xFFE2) = ch;
+                        REGS(0xFFE2) = (uint8_t)ch;
                         REGS(0xFFE0) |= 0b01000000;
                         com_rx_char = -1;
                     }
@@ -363,26 +361,31 @@ __attribute__((optimize("O3"))) static void __no_inline_not_in_flash_func(act_lo
                     break;
                 }
                 case CASE_WRITE(0xFFE1): // UART Tx
-                    if (com_tx_writable())
-                        com_tx_write(data);
-                    if (com_tx_writable())
+                    if (com_act_writable())
+                        com_act_write(data);
+                    if (com_act_writable())
                         REGS(0xFFE0) |= 0b10000000;
                     else
                         REGS(0xFFE0) &= ~0b10000000;
                     break;
                 case CASE_READ(0xFFE0): // UART Tx/Rx flow control
                 {
-                    int ch = com_rx_char;
-                    if (!(REGS(0xFFE0) & 0b01000000) && ch >= 0)
+                    uint8_t flags = REGS(0xFFE0);
+                    if (!(flags & 0b01000000))
                     {
-                        REGS(0xFFE2) = ch;
-                        REGS(0xFFE0) |= 0b01000000;
-                        com_rx_char = -1;
+                        int ch = com_rx_char;
+                        if (ch >= 0)
+                        {
+                            REGS(0xFFE2) = (uint8_t)ch;
+                            flags |= 0b01000000;
+                            com_rx_char = -1;
+                        }
                     }
-                    if (com_tx_writable())
-                        REGS(0xFFE0) |= 0b10000000;
+                    if (com_act_writable())
+                        flags |= 0b10000000;
                     else
-                        REGS(0xFFE0) &= ~0b10000000;
+                        flags &= ~0b10000000;
+                    REGS(0xFFE0) = flags;
                     break;
                 }
                 }

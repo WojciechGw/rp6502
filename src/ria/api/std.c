@@ -168,8 +168,8 @@ static std_rw_result std_tty_write(int desc, const char *buf, uint32_t count, ui
     (void)desc;
     (void)err;
     uint32_t i = 0;
-    for (; i < count && com_tx_writable(); i++)
-        com_tx_write(buf[i]);
+    for (; i < count && com_writable(); i++)
+        com_write(buf[i]);
     *bytes_written = i;
     return STD_OK;
 }
