@@ -170,9 +170,10 @@ static void term_out_FF(term_state_t *term)
         term->erase_fg_color[i] = term->fg_color;
         term->erase_bg_color[i] = term->bg_color;
     }
+    term->x = 0;
     term->y = 0;
     term->y_offset = 0;
-    term->ptr = term->mem + term->x;
+    term->ptr = term->mem;
     term->cleaned = false;
     term_clean_line(term, 0);
 }
@@ -214,13 +215,28 @@ static void term_state_set_height(term_state_t *term, uint8_t height)
             term->height++;
             if (term->y == term->height - 2)
             {
+                // Reveal one row of scrollback above the view; content
+                // shifts down by one so the per-screen-row arrays do too.
                 term->y++;
                 if (!term->y_offset)
                     term->y_offset = TERM_MAX_HEIGHT - 1;
                 else
                     term->y_offset--;
+                for (int i = term->height - 1; i > 0; i--)
+                {
+                    term->wrapped[i] = term->wrapped[i - 1];
+                    term->dirty[i] = term->dirty[i - 1];
+                    term->erase_fg_color[i] = term->erase_fg_color[i - 1];
+                    term->erase_bg_color[i] = term->erase_bg_color[i - 1];
+                }
+                term->wrapped[0] = false;
+                term->dirty[0] = false;
                 continue;
             }
+            // Expose one fresh row at the bottom; reset its metadata so
+            // any stale dirty/wrap from a previous shrink can't resurface.
+            term->wrapped[term->height - 1] = false;
+            term->dirty[term->height - 1] = false;
             row = term->y_offset + term->height - 1;
         }
         else
@@ -248,8 +264,8 @@ static void term_state_set_height(term_state_t *term, uint8_t height)
         for (size_t i = 0; i < term->width; i++)
         {
             data[i].font_code = ' ';
-            data[i].fg_color = term->fg_color;
-            data[i].bg_color = term->bg_color;
+            data[i].fg_color = color_256[TERM_FG_COLOR_INDEX];
+            data[i].bg_color = color_256[TERM_BG_COLOR_INDEX];
         }
     }
 }
@@ -367,7 +383,10 @@ static void term_out_SGR(term_state_t *term)
             return;
         case 39:
             term->fg_color_index = TERM_FG_COLOR_INDEX;
-            term->fg_color = color_256[TERM_FG_COLOR_INDEX];
+            if (!term->bold)
+                term->fg_color = color_256[TERM_FG_COLOR_INDEX];
+            else
+                term->fg_color = color_256[TERM_FG_COLOR_INDEX + 8];
             break;
         case 40: // background color
         case 41:
@@ -388,7 +407,10 @@ static void term_out_SGR(term_state_t *term)
             return;
         case 49:
             term->bg_color_index = TERM_BG_COLOR_INDEX;
-            term->bg_color = color_256[TERM_BG_COLOR_INDEX];
+            if (!term->blink)
+                term->bg_color = color_256[TERM_BG_COLOR_INDEX];
+            else
+                term->bg_color = color_256[TERM_BG_COLOR_INDEX + 8];
             break;
         case 58: // Underline not supported, but eat colors
             return;
@@ -400,7 +422,8 @@ static void term_out_SGR(term_state_t *term)
         case 95:
         case 96:
         case 97:
-            term->fg_color = color_256[param - 90 + 8];
+            term->fg_color_index = param - 90;
+            term->fg_color = color_256[term->fg_color_index + 8];
             break;
         case 100: // bright background color
         case 101:
@@ -410,7 +433,8 @@ static void term_out_SGR(term_state_t *term)
         case 105:
         case 106:
         case 107:
-            term->bg_color = color_256[param - 100 + 8];
+            term->bg_color_index = param - 100;
+            term->bg_color = color_256[term->bg_color_index + 8];
             break;
         }
     }
@@ -485,7 +509,7 @@ static void term_out_LF(term_state_t *term, bool wrapping)
     term_constrain_ptr(term);
     if (wrapping)
         term->wrapped[term->y] = wrapping;
-    else if (term->wrapped[term->y])
+    else if (term->y < term->height - 1 && term->wrapped[term->y])
     {
         ++term->y;
         return term_out_LF(term, false);
@@ -497,16 +521,18 @@ static void term_out_LF(term_state_t *term, bool wrapping)
         for (size_t x = 0; x < term->width; x++)
         {
             line_ptr[x].font_code = ' ';
-            line_ptr[x].fg_color = term->fg_color;
-            line_ptr[x].bg_color = term->bg_color;
+            line_ptr[x].fg_color = color_256[TERM_FG_COLOR_INDEX];
+            line_ptr[x].bg_color = color_256[TERM_BG_COLOR_INDEX];
         }
         if (++term->y_offset == TERM_MAX_HEIGHT)
             term->y_offset = 0;
-        // scroll the wrapped and dirty flags
+        // scroll the wrapped, dirty, and erase-color arrays
         for (uint8_t y = 0; y < term->height - 1; y++)
         {
             term->wrapped[y] = term->wrapped[y + 1];
             term->dirty[y] = term->dirty[y + 1];
+            term->erase_fg_color[y] = term->erase_fg_color[y + 1];
+            term->erase_bg_color[y] = term->erase_bg_color[y + 1];
         }
         term->wrapped[term->height - 1] = false;
         term->dirty[term->height - 1] = false;
@@ -630,9 +656,8 @@ static void term_out_CUB(term_state_t *term)
 static void term_out_DCH(term_state_t *term)
 {
     unsigned max_chars = term->width - term->x;
-    for (uint8_t i = term->y; i < term->height - 1; i++)
-        if (term->wrapped[i])
-            max_chars += term->width;
+    for (uint8_t i = term->y; i < term->height - 1 && term->wrapped[i]; i++)
+        max_chars += term->width;
     uint16_t chars = term->csi_param[0];
     if (chars < 1)
         chars = 1;
@@ -659,6 +684,34 @@ static void term_out_DCH(term_state_t *term)
         tp_dst->bg_color = term->bg_color;
         if (++tp_dst >= tp_max)
             tp_dst -= term->width * TERM_MAX_HEIGHT;
+    }
+
+    // Scan back from the end of the logical line to find the real content
+    // length, then retire any wrap-chain rows the content no longer reaches.
+    unsigned content_len = max_chars;
+    term_data_t *cell = term->ptr + max_chars;
+    if (cell >= tp_max)
+        cell -= term->width * TERM_MAX_HEIGHT;
+    while (content_len > 0)
+    {
+        if (cell == term->mem)
+            cell = tp_max;
+        cell--;
+        if (cell->font_code != ' ')
+            break;
+        content_len--;
+    }
+    unsigned row_capacity = term->width - term->x;
+    for (uint8_t i = term->y; i < term->height - 1 && term->wrapped[i]; i++)
+    {
+        if (content_len <= row_capacity)
+        {
+            for (uint8_t j = i; j < term->height - 1 && term->wrapped[j]; j++)
+                term->wrapped[j] = false;
+            break;
+        }
+        content_len -= row_capacity;
+        row_capacity = term->width;
     }
 }
 
