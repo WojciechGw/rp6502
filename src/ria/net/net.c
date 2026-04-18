@@ -8,9 +8,17 @@
 
 #include "net/mdm.h"
 #include "net/net.h"
+#include <lwip/ip.h>
 #include <lwip/tcp.h>
 #include <lwip/dns.h>
 #include <string.h>
+
+// Keepalive timing: detect silent peer disappearance (NAT drop, router
+// reboot, client Wi-Fi loss) in ~90 s so net_err → net_close →
+// on_close can recover state instead of wedging forever on tcp_sndbuf=0.
+#define NET_KEEP_IDLE_MS 60000
+#define NET_KEEP_INTVL_MS 10000
+#define NET_KEEP_CNT 3
 
 #if defined(DEBUG_RIA_NET) || defined(DEBUG_RIA_NET_NET)
 #include <stdio.h>
@@ -98,6 +106,16 @@ static net_listener_t net_listeners[NET_MAX_LISTENERS];
 static int net_desc(net_conn_t *nc)
 {
     return (int)(nc - net_conns);
+}
+
+static void net_arm_keepalive(struct tcp_pcb *pcb)
+{
+    ip_set_option(pcb, SOF_KEEPALIVE);
+#if LWIP_TCP_KEEPALIVE
+    pcb->keep_idle = NET_KEEP_IDLE_MS;
+    pcb->keep_intvl = NET_KEEP_INTVL_MS;
+    pcb->keep_cnt = NET_KEEP_CNT;
+#endif
 }
 
 static void net_drain(net_conn_t *nc)
@@ -362,6 +380,7 @@ static void net_dns_found(const char *name, const ip_addr_t *ipaddr, void *arg)
     tcp_nagle_disable(nc->pcb);
     tcp_err(nc->pcb, net_err);
     tcp_recv(nc->pcb, net_recv);
+    net_arm_keepalive(nc->pcb);
     err_t err = tcp_connect(nc->pcb, ipaddr, nc->port, net_connected);
     if (err != ERR_OK)
     {
@@ -544,6 +563,7 @@ bool net_accept(int desc, uint16_t port, void (*on_close)(int))
     tcp_nagle_disable(nc->pcb);
     tcp_err(nc->pcb, net_err);
     tcp_recv(nc->pcb, net_recv);
+    net_arm_keepalive(nc->pcb);
     DBG("NET accepted connection on port %u desc %d\n", port, desc);
     return true;
 }
