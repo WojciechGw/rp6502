@@ -86,6 +86,7 @@ target_sources(${RIA_TARGET} PRIVATE
     net/cmd.c
     net/cyw.c
     net/mdm.c
+    net/net.c
     net/ntp.c
     net/tel.c
     net/wfi.c

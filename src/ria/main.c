@@ -27,6 +27,7 @@
 #include "net/cyw.h"
 #include "net/mdm.h"
 #include "net/ntp.h"
+#include "net/tel.h"
 #include "net/wfi.h"
 #include "str/rln.h"
 #include "sys/com.h"
@@ -80,6 +81,7 @@ static void init(void)
     rom_init();
     clk_init();
     mdm_init();
+    tel_init();
     rln_init();
 
     // USB near end for boot enum timing
@@ -109,6 +111,7 @@ void main_task(void)
     ble_task();
     led_task();
     mdm_task();
+    tel_task();
     ram_task();
 }
 
@@ -128,7 +131,6 @@ static void task(void)
 static void run(void)
 {
     pro_run();
-    com_run();
     rln_run();
     dir_run();
     vga_run();
@@ -143,7 +145,6 @@ static void stop(void)
 {
     cpu_stop(); // Must be first
     vga_stop(); // Must be before ria
-    com_stop();
     rln_stop();
     api_stop();
     ria_stop();

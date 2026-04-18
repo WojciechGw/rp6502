@@ -13,9 +13,9 @@
 
 // Configuration files on littlefs
 X(STR_CFG_FILENAME, "CONFIG.SYS")
-X(STR_MDM_PHONEBOOK, "PHONE0.SYS")
-X(STR_MDM_PHONE_TMP, "PHONE0.TMP")
-X(STR_MDM_SETTINGS, "MODEM0.SYS")
+X(STR_MDM_PHONEBOOK, "PHONE%d.SYS")
+X(STR_MDM_PHONE_TMP, "PHONE%d.TMP")
+X(STR_MDM_SETTINGS, "MODEM%d.SYS")
 
 // https://www.ntppool.org/
 X(STR_NTP_SERVER, "pool.ntp.org")
@@ -82,6 +82,8 @@ X(STR_RF, "RF")
 X(STR_RFCC, "RFCC")
 X(STR_SSID, "SSID")
 X(STR_PASS, "PASS")
+X(STR_PORT, "PORT")
+X(STR_KEY, "KEY")
 X(STR_BLE, "BLE")
 X(STR_NFC, "NFC")
 X(STR_ABOUT, "ABOUT")
@@ -117,7 +119,14 @@ X(STR_SET_RF_RESPONSE, "RF  : %d (%s)\n")
 X(STR_SET_RFCC_RESPONSE, "RFCC: %s%s(%s)\n")
 X(STR_SET_SSID_RESPONSE, "SSID: %s\n")
 X(STR_SET_PASS_RESPONSE, "PASS: %s\n")
+X(STR_SET_PORT_RESPONSE, "PORT: %u (%s)\n")
+X(STR_SET_KEY_RESPONSE, "KEY : %s\n")
 X(STR_SET_BLE_RESPONSE, "BLE : %d (%s%s%s)\n")
+
+// Telnet console
+X(STR_TEL_PASSKEY, "\r\nPasskey: ")
+X(STR_TEL_CONNECTED, "\r\nConnected\r\n")
+X(STR_TEL_ACCESS_DENIED, "\r\n?Access denied\r\n")
 
 // Virtual modem
 X(STR_MDM_RESPONSE_0, "OK")
