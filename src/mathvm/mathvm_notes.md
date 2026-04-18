@@ -2345,6 +2345,105 @@ Na początek zrobiłbym dwa osobne tryby batch zamiast pełnej ogólności:
     SPR2L_BATCH
 
 To będzie prostsze i szybsze niż pełny ogólny VM loop.
+
+16.2. Example future batch: sine table for 0..90 degrees
+
+This is a good example of a batch kernel that is useful in practice, but is
+still clearly outside the current v1 scope.
+
+Goal:
+
+    compute sin(deg * pi / 180) for deg = 0..90
+
+    write 91 float32 results to xram_out
+
+Suggested contract:
+
+    count    = 91
+
+    xram_in  = optional; may be unused if the kernel derives deg from the loop index
+
+    xram_out = 91 records * 4 bytes = 364 bytes
+
+    each output record = one float32 sine value
+
+Minimal locals:
+
+    locals[0] = deg0      = 0.0f
+
+    locals[1] = step_deg  = 1.0f
+
+    locals[2] = k         = pi / 180.0f
+
+Symbolic batch logic:
+
+    for i in 0 .. count-1:
+
+        deg = deg0 + i * step_deg
+
+        rad = deg * k
+
+        out[i] = sin(rad)
+
+If this is implemented as a dedicated batch opcode, the ABI can stay very small:
+
+    opcode      = FSIN_TABLE_BATCH
+
+    inputs      = locals[deg0, step_deg, k], count
+
+    output      = count float32 values in xram_out
+
+    xram_in     = not required
+
+If this is implemented through a more general future batch VM, then the VM needs
+explicit XRAM element load/store semantics, for example:
+
+    read current batch index i
+
+    compute deg from locals and i
+
+    FSIN
+
+    store one float32 to the current xram_out record
+
+Suggested symbolic program for such a future generic batch engine:
+
+    LDI      i
+
+    ITOF
+
+    LDS      1        ; step_deg
+
+    FMUL
+
+    LDS      0        ; deg0
+
+    FADD
+
+    LDS      2        ; pi/180
+
+    FMUL
+
+    FSIN
+
+    STOUT0           ; store float32 result to current xram_out record
+
+For this specific use case, a dedicated batch opcode is likely better than a
+fully generic VM loop, because:
+
+    the kernel is tiny
+
+    it does not need xram_in
+
+    output stride is fixed
+
+    the result is naturally sequential
+
+Practical XRAM size for this example:
+
+    xram_out = 91 * 4 = 364 bytes
+
+    total XRAM = 364 bytes if xram_in is omitted
 17. Minimalny pakowacz po stronie 6502 / hosta
 
 Jeśli składasz ramkę po stronie C hosta:

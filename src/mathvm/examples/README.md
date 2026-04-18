@@ -6,6 +6,7 @@ Pliki:
 
 - `m3v3l_cc65.c`: przykład w `cc65 C`
 - `m3v3l_ca65.s`: przykład w czystym `6502 asm` dla `ca65`
+- `mathvm_pitagoras_cc65.c`: minimalny przykład `sqrt(3*3 + 4*4) = 5.0`
 - `mathvm_negative_cc65.c`: mały zestaw negatywnych testów `v1` w `cc65 C`
 - `mathvm_negative_ca65.s`: ten sam zestaw negatywnych testów w czystym `6502 asm`
 - `mathvm_mathcop_cc65.c`: test zgodności `MATHVM` wzorowany na `MTHexamples/mathcop.c`
