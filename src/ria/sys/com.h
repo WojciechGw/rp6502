@@ -27,6 +27,7 @@
 
 void com_init(void);
 void com_task(void);
+void com_stop(void);
 
 // The '\a' BEL alert
 bool com_get_bel(void);
