@@ -7,11 +7,16 @@ Pliki:
 - `m3v3l_cc65.c`: przykład w `cc65 C`
 - `m3v3l_ca65.s`: przykład w czystym `6502 asm` dla `ca65`
 - `mathvm_pitagoras_cc65.c`: minimalny przykład `sqrt(3*3 + 4*4) = 5.0`
+- `mathvm_pitagoras_humanside_cc65.c`: ten sam przykład, ale użytkownik podaje stringi, np. `"3.2"` i `"4.3"`, a konwersja do `float32` jest ukryta
+- `mathvm_pitagoras_llvmmos.c`: wariant float-friendly dla toolchainu `llvm-mos`
 - `mathvm_negative_cc65.c`: mały zestaw negatywnych testów `v1` w `cc65 C`
 - `mathvm_negative_ca65.s`: ten sam zestaw negatywnych testów w czystym `6502 asm`
 - `mathvm_mathcop_cc65.c`: test zgodności `MATHVM` wzorowany na `MTHexamples/mathcop.c`
 - `mathvm_batch_benchmark_cc65.c`: benchmark jednego wywołania `MATHVM` vs wielu scalar RPC `mth_*`
+- `mathvm_octahedron_cc65.c`: prostsze demo batchowe z ośmiościanem w wersji `cc65`
+- `mathvm_octahedron_batch_llvmmos.c`: ten sam prostszy pokaz batcha, ale z geometrią i macierzą wyrażonymi jako zwykłe `float`
 - `mathvm_dodecahedron_batch_cc65.c`: dwunastościan z jednym wywołaniem `MATHVM` na klatkę dla wszystkich 20 wierzchołków
+- `mathvm_dodecahedron_batch_llvmmos.c`: ten sam pokaz batcha, ale z geometrią i macierzą wyrażonymi jako zwykłe `float`
 - `mathvm_dodecahedron_debug_cc65.c`: debug batcha dwunastościanu, wypisuje zakres i pierwsze współrzędne z `xram_out`
 - `spr2l_bbox_cc65.c`: przykład `SPR2L` w `cc65 C`
 - `spr2l_bbox_ca65.s`: przykład `SPR2L` w czystym `6502 asm`

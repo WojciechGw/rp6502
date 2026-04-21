@@ -21,6 +21,7 @@
 #define F32_5_5          0x40B00000UL
 #define F32_7_0          0x40E00000UL
 #define F32_8_0          0x41000000UL
+#define F32_91_0         0x42B60000UL
 #define F32_PI_OVER_180  0x3C8EFA35UL
 #define F32_10000        0x461C4000UL
 #define F32_NEG_2_0      0xC0000000UL
@@ -157,62 +158,6 @@ static mx_client_result_t run_binary_d64(uint8_t op,
     return mx_client_call_frame(frame, len, out, 2u);
 }
 
-static long mathvm_sin10000(int deg)
-{
-    uint8_t frame[64];
-    uint16_t len = 0;
-    mx_word_t out[1];
-    mx_client_result_t call;
-
-    append_header(frame, &len, 23u, 1u, 8u);
-    append_u8(frame, &len, MX_PUSHI);
-    append_u32le(frame, &len, (uint32_t)deg);
-    append_u8(frame, &len, MX_ITOF);
-    append_u8(frame, &len, MX_PUSHF);
-    append_u32le(frame, &len, F32_PI_OVER_180);
-    append_u8(frame, &len, MX_FMUL);
-    append_u8(frame, &len, MX_FSIN);
-    append_u8(frame, &len, MX_PUSHF);
-    append_u32le(frame, &len, F32_10000);
-    append_u8(frame, &len, MX_FMUL);
-    append_u8(frame, &len, MX_FTOI);
-    append_u8(frame, &len, MX_RET);
-    append_u8(frame, &len, 0x01);
-
-    call = mx_client_call_frame(frame, len, out, 1u);
-    if (call.status != 0 || call.out_words != 1)
-        return 0;
-    return (long)out[0].i32;
-}
-
-static long mathvm_cos10000(int deg)
-{
-    uint8_t frame[64];
-    uint16_t len = 0;
-    mx_word_t out[1];
-    mx_client_result_t call;
-
-    append_header(frame, &len, 23u, 1u, 8u);
-    append_u8(frame, &len, MX_PUSHI);
-    append_u32le(frame, &len, (uint32_t)deg);
-    append_u8(frame, &len, MX_ITOF);
-    append_u8(frame, &len, MX_PUSHF);
-    append_u32le(frame, &len, F32_PI_OVER_180);
-    append_u8(frame, &len, MX_FMUL);
-    append_u8(frame, &len, MX_FCOS);
-    append_u8(frame, &len, MX_PUSHF);
-    append_u32le(frame, &len, F32_10000);
-    append_u8(frame, &len, MX_FMUL);
-    append_u8(frame, &len, MX_FTOI);
-    append_u8(frame, &len, MX_RET);
-    append_u8(frame, &len, 0x01);
-
-    call = mx_client_call_frame(frame, len, out, 1u);
-    if (call.status != 0 || call.out_words != 1)
-        return 0;
-    return (long)out[0].i32;
-}
-
 static void check_int(const char *name, int result, int expected)
 {
     if (result == expected)
@@ -252,72 +197,131 @@ static long bhaskara_cos10000(int deg)
     return bhaskara_sin10000(90 - deg);
 }
 
-static void benchmark_sine(void)
+static long cpu_sum_trig10000(uint8_t trig_op)
 {
-    clock_t t_start;
-    clock_t t_vm;
-    clock_t t_cpu;
-    unsigned long ratio_tenths;
-    int i;
-    long dummy = 0;
+    long sum = 0;
+    int deg;
 
-    puts("\n-- Benchmark: Sine Table (91 values, 0-90 deg) --");
+    for (deg = 0; deg <= 90; ++deg)
+        sum += (trig_op == MX_FSIN) ? bhaskara_sin10000(deg) : bhaskara_cos10000(deg);
 
-    t_start = clock();
-    for (i = 0; i <= 90; ++i)
-        dummy += mathvm_sin10000(i);
-    t_vm = clock() - t_start;
-
-    t_start = clock();
-    for (i = 0; i <= 90; ++i)
-        dummy += bhaskara_sin10000(i);
-    t_cpu = clock() - t_start;
-
-    printf("MATHVM       : %lu ms\n",
-           (unsigned long)t_vm * 1000UL / (unsigned long)CLOCKS_PER_SEC);
-    printf("CPU Bhaskara : %lu ms\n",
-           (unsigned long)t_cpu * 1000UL / (unsigned long)CLOCKS_PER_SEC);
-    if (t_vm > 0)
-    {
-        ratio_tenths = ((unsigned long)t_cpu * 10UL + (unsigned long)t_vm / 2UL) /
-                       (unsigned long)t_vm;
-        printf("CPU/MATHVM ratio: %lu.%lux\n", ratio_tenths / 10UL, ratio_tenths % 10UL);
-    }
-    (void)dummy;
+    return sum;
 }
 
-static void benchmark_cosine(void)
+static uint8_t build_sum_trig_frame(uint8_t trig_op, uint8_t *frame)
+{
+    uint8_t prog[80];
+    uint16_t prog_len = 0;
+    uint16_t frame_len = 0;
+    uint16_t loop_start;
+    uint16_t rel_pos;
+    int8_t rel;
+
+    loop_start = prog_len;
+
+    append_u8(prog, &prog_len, MX_LDS);  append_u8(prog, &prog_len, 0x01);
+    append_u8(prog, &prog_len, MX_LDS);  append_u8(prog, &prog_len, 0x00);
+    append_u8(prog, &prog_len, MX_PUSHF); append_u32le(prog, &prog_len, F32_PI_OVER_180);
+    append_u8(prog, &prog_len, MX_FMUL);
+    append_u8(prog, &prog_len, trig_op);
+    append_u8(prog, &prog_len, MX_PUSHF); append_u32le(prog, &prog_len, F32_10000);
+    append_u8(prog, &prog_len, MX_FMUL);
+    append_u8(prog, &prog_len, MX_FADD);
+    append_u8(prog, &prog_len, MX_STS);  append_u8(prog, &prog_len, 0x01);
+
+    append_u8(prog, &prog_len, MX_LDS);  append_u8(prog, &prog_len, 0x00);
+    append_u8(prog, &prog_len, MX_PUSHF); append_u32le(prog, &prog_len, F32_1_0);
+    append_u8(prog, &prog_len, MX_FADD);
+    append_u8(prog, &prog_len, MX_STS);  append_u8(prog, &prog_len, 0x00);
+
+    append_u8(prog, &prog_len, MX_LDS);  append_u8(prog, &prog_len, 0x02);
+    append_u8(prog, &prog_len, MX_PUSHF); append_u32le(prog, &prog_len, F32_1_0);
+    append_u8(prog, &prog_len, MX_FSUB);
+    append_u8(prog, &prog_len, MX_DUP);
+    append_u8(prog, &prog_len, MX_STS);  append_u8(prog, &prog_len, 0x02);
+    append_u8(prog, &prog_len, MX_JNZ);
+    rel_pos = prog_len;
+    append_u8(prog, &prog_len, 0x00);
+
+    append_u8(prog, &prog_len, MX_LDS);  append_u8(prog, &prog_len, 0x01);
+    append_u8(prog, &prog_len, MX_RET);  append_u8(prog, &prog_len, 0x01);
+
+    rel = (int8_t)((int)loop_start - (int)(rel_pos + 1u));
+    prog[rel_pos] = (uint8_t)rel;
+
+    append_u8(frame, &frame_len, 0x4D);
+    append_u8(frame, &frame_len, 0x01);
+    append_u8(frame, &frame_len, 0x00);
+    append_u8(frame, &frame_len, MX_HEADER_BYTES);
+    append_u8(frame, &frame_len, prog_len);
+    append_u8(frame, &frame_len, 0x03);
+    append_u8(frame, &frame_len, 0x01);
+    append_u8(frame, &frame_len, 0x10);
+    append_u16le(frame, &frame_len, 0xFFFFu);
+    append_u16le(frame, &frame_len, 0xFFFFu);
+    append_u16le(frame, &frame_len, 0x0001u);
+    append_u16le(frame, &frame_len, 0x0000u);
+
+    append_u32le(frame, &frame_len, F32_0_0);
+    append_u32le(frame, &frame_len, F32_0_0);
+    append_u32le(frame, &frame_len, F32_91_0);
+
+    {
+        uint8_t i;
+        for (i = 0; i < prog_len; ++i)
+            append_u8(frame, &frame_len, prog[i]);
+    }
+
+    return (uint8_t)frame_len;
+}
+
+static uint32_t mathvm_sum_trig10000(uint8_t trig_op)
+{
+    uint8_t frame[128];
+    uint8_t frame_len;
+    mx_word_t out[1];
+    mx_client_result_t call;
+
+    frame_len = build_sum_trig_frame(trig_op, frame);
+    call = mx_client_call_frame(frame, frame_len, out, 1u);
+    if (call.status != 0 || call.out_words != 1)
+        return 0xFFFFFFFFUL;
+    return out[0].u32;
+}
+
+static void benchmark_one(const char *name, uint8_t trig_op)
 {
     clock_t t_start;
-    clock_t t_vm;
     clock_t t_cpu;
+    clock_t t_mathvm;
     unsigned long ratio_tenths;
-    int i;
-    long dummy = 0;
+    long cpu_sum;
+    uint32_t mathvm_sum;
 
-    puts("\n-- Benchmark: Cosine Table (91 values, 0-90 deg) --");
-
-    t_start = clock();
-    for (i = 0; i <= 90; ++i)
-        dummy += mathvm_cos10000(i);
-    t_vm = clock() - t_start;
+    puts("");
+    printf("-- Benchmark: %s sum(0..90) --\n", name);
 
     t_start = clock();
-    for (i = 0; i <= 90; ++i)
-        dummy += bhaskara_cos10000(i);
+    cpu_sum = cpu_sum_trig10000(trig_op);
     t_cpu = clock() - t_start;
 
-    printf("MATHVM       : %lu ms\n",
-           (unsigned long)t_vm * 1000UL / (unsigned long)CLOCKS_PER_SEC);
-    printf("CPU Bhaskara : %lu ms\n",
+    t_start = clock();
+    mathvm_sum = mathvm_sum_trig10000(trig_op);
+    t_mathvm = clock() - t_start;
+
+    printf("pure CPU      : %lu ms\n",
            (unsigned long)t_cpu * 1000UL / (unsigned long)CLOCKS_PER_SEC);
-    if (t_vm > 0)
+    printf("one MATHVM call: %lu ms\n",
+           (unsigned long)t_mathvm * 1000UL / (unsigned long)CLOCKS_PER_SEC);
+    printf("CPU sum (x10000): %ld\n", cpu_sum);
+    printf("MATHVM sum bits: %08lX\n", (unsigned long)mathvm_sum);
+
+    if (t_mathvm > 0)
     {
-        ratio_tenths = ((unsigned long)t_cpu * 10UL + (unsigned long)t_vm / 2UL) /
-                       (unsigned long)t_vm;
+        ratio_tenths = ((unsigned long)t_cpu * 10UL + (unsigned long)t_mathvm / 2UL) /
+                       (unsigned long)t_mathvm;
         printf("CPU/MATHVM ratio: %lu.%lux\n", ratio_tenths / 10UL, ratio_tenths % 10UL);
     }
-    (void)dummy;
 }
 
 int main(void)
@@ -423,8 +427,8 @@ int main(void)
     check_long("DDIV   3.0/1.5=2.0 lo", (call.status == 0) ? out[0].u32 : 0xFFFFFFFFUL, 0x00000000UL);
     check_long("DDIV   3.0/1.5=2.0 hi", (call.status == 0) ? out[1].u32 : 0xFFFFFFFFUL, 0x40000000UL);
 
-    benchmark_sine();
-    benchmark_cosine();
+    benchmark_one("sine", MX_FSIN);
+    benchmark_one("cosine", MX_FCOS);
 
     puts("");
     printf("Results: %u passed, %u failed\n", passed, failed);

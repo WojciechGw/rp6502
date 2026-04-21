@@ -9,6 +9,7 @@
 #include <math.h>
 #include <string.h>
 
+/* Read one little-endian 32-bit word from a byte pointer. */
 static uint32_t rd_u32le(const uint8_t *p)
 {
     return ((uint32_t)p[0]) |
@@ -17,12 +18,14 @@ static uint32_t rd_u32le(const uint8_t *p)
            ((uint32_t)p[3] << 24);
 }
 
+/* Write one little-endian 16-bit value to a byte pointer. */
 static void wr_u16le(uint8_t *p, uint16_t value)
 {
     p[0] = (uint8_t)(value & 0xFFu);
     p[1] = (uint8_t)(value >> 8);
 }
 
+/* Validate that an XRAM range stays within the 64 KB XRAM address space. */
 static bool mx_check_xram_range(mx_vm_t *vm, uint16_t addr, uint32_t size)
 {
     if ((uint32_t)addr + size > 0x10000u)
@@ -33,6 +36,7 @@ static bool mx_check_xram_range(mx_vm_t *vm, uint16_t addr, uint32_t size)
     return true;
 }
 
+/* Validate batch-related XRAM flags and header arguments. */
 static bool mx_check_xram_args(mx_vm_t *vm)
 {
     bool use_in = (vm->hdr.flags & MX_FLAG_USE_XRAM_IN) != 0u;
@@ -52,6 +56,7 @@ static bool mx_check_xram_args(mx_vm_t *vm)
     return true;
 }
 
+/* Read one unsigned byte argument from the current program counter. */
 static bool mx_read_u8(mx_vm_t *vm, uint8_t *value)
 {
     if (vm->pc >= vm->hdr.prog_len)
@@ -63,6 +68,7 @@ static bool mx_read_u8(mx_vm_t *vm, uint8_t *value)
     return true;
 }
 
+/* Read one signed byte argument from the current program counter. */
 static bool mx_read_i8(mx_vm_t *vm, int8_t *value)
 {
     uint8_t raw;
@@ -73,6 +79,7 @@ static bool mx_read_i8(mx_vm_t *vm, int8_t *value)
     return true;
 }
 
+/* Read one little-endian 32-bit immediate from the current program counter. */
 static bool mx_read_u32(mx_vm_t *vm, uint32_t *value)
 {
     if ((uint16_t)vm->pc + 4u > vm->hdr.prog_len)
@@ -85,6 +92,7 @@ static bool mx_read_u32(mx_vm_t *vm, uint32_t *value)
     return true;
 }
 
+/* Push one word onto the VM stack with bounds checking. */
 static bool mx_push(mx_vm_t *vm, mx_word_t value)
 {
     if (vm->sp >= vm->hdr.stack_words || vm->sp >= MX_MAX_STACK)
@@ -96,6 +104,7 @@ static bool mx_push(mx_vm_t *vm, mx_word_t value)
     return true;
 }
 
+/* Pop one word from the VM stack with underflow checking. */
 static bool mx_pop(mx_vm_t *vm, mx_word_t *value)
 {
     if (vm->sp == 0)
@@ -107,6 +116,7 @@ static bool mx_pop(mx_vm_t *vm, mx_word_t *value)
     return true;
 }
 
+/* Push one 64-bit value as two 32-bit stack words. */
 static bool mx_push_u64(mx_vm_t *vm, uint64_t value)
 {
     mx_word_t lo;
@@ -119,6 +129,7 @@ static bool mx_push_u64(mx_vm_t *vm, uint64_t value)
     return true;
 }
 
+/* Pop one 64-bit value stored as two 32-bit stack words. */
 static bool mx_pop_u64(mx_vm_t *vm, uint64_t *value)
 {
     mx_word_t lo;
@@ -130,6 +141,7 @@ static bool mx_pop_u64(mx_vm_t *vm, uint64_t *value)
     return true;
 }
 
+/* Reinterpret one 64-bit bit pattern as a double64 value. */
 static double mx_bits_to_d64(uint64_t bits)
 {
     double value;
@@ -138,6 +150,7 @@ static double mx_bits_to_d64(uint64_t bits)
     return value;
 }
 
+/* Reinterpret one double64 value as its raw 64-bit bit pattern. */
 static uint64_t mx_d64_to_bits(double value)
 {
     uint64_t bits;
@@ -146,6 +159,7 @@ static uint64_t mx_d64_to_bits(double value)
     return bits;
 }
 
+/* Validate one locals range before load or store operations. */
 static bool mx_check_local(mx_vm_t *vm, uint8_t idx, uint8_t count)
 {
     if ((uint16_t)idx + count > vm->hdr.local_words || (uint16_t)idx + count > MX_MAX_LOCALS)
@@ -156,6 +170,7 @@ static bool mx_check_local(mx_vm_t *vm, uint8_t idx, uint8_t count)
     return true;
 }
 
+/* Validate and apply one relative jump target. */
 static bool mx_check_jump_target(mx_vm_t *vm, int8_t rel)
 {
     int target = (int)vm->pc + rel;
@@ -169,6 +184,7 @@ static bool mx_check_jump_target(mx_vm_t *vm, int8_t rel)
     return true;
 }
 
+/* Optionally pack float outputs to low 16-bit integer words. */
 static bool mx_pack_i16_output(mx_vm_t *vm)
 {
     uint8_t i;
@@ -207,6 +223,7 @@ static bool mx_pack_i16_output(mx_vm_t *vm)
     return true;
 }
 
+/* Apply one 2D affine transform to one input point. */
 static void mx_transform_point2(float a, float b, float tx,
                                 float c, float d, float ty,
                                 float x, float y, float out[2])
@@ -215,6 +232,7 @@ static void mx_transform_point2(float a, float b, float tx,
     out[1] = fmaf(c, x, fmaf(d, y, ty));
 }
 
+/* Execute the SPR2L opcode for one sprite transform request. */
 static bool mx_exec_spr2l(mx_vm_t *vm, uint8_t ab, uint8_t sb, uint8_t flags)
 {
     float a;
@@ -306,6 +324,7 @@ static bool mx_exec_spr2l(mx_vm_t *vm, uint8_t ab, uint8_t sb, uint8_t flags)
     return true;
 }
 
+/* Execute the M3V3P2X batch opcode over XRAM input and output buffers. */
 static bool mx_exec_m3v3p2x(mx_vm_t *vm, uint8_t mb, uint8_t cb)
 {
     uint16_t in_addr = vm->hdr.xram_in;
@@ -391,6 +410,7 @@ static bool mx_exec_m3v3p2x(mx_vm_t *vm, uint8_t mb, uint8_t cb)
     return true;
 }
 
+/* Pull the current frame payload from XSTACK into a linear buffer. */
 static uint16_t mx_xstack_pull_frame(uint8_t *frame, size_t frame_cap)
 {
     size_t frame_len = XSTACK_SIZE - xstack_ptr;
@@ -406,6 +426,7 @@ static uint16_t mx_xstack_pull_frame(uint8_t *frame, size_t frame_cap)
     return (uint16_t)frame_len;
 }
 
+/* Push VM output words back to XSTACK in return order. */
 static bool mx_xstack_push_output(const mx_vm_t *vm)
 {
     uint8_t i = vm->outc;
@@ -416,11 +437,13 @@ static bool mx_xstack_push_output(const mx_vm_t *vm)
     return true;
 }
 
+/* Return one status code and output count through the RIA A/X convention. */
 static bool mx_return_status(mx_status_t status, uint8_t out_words)
 {
     return api_return_ax((uint16_t)status | ((uint16_t)out_words << 8));
 }
 
+/* Load, validate, and copy a binary MATHVM frame into a VM instance. */
 bool mx_load_frame(mx_vm_t *vm, const uint8_t *frame, uint16_t frame_len)
 {
     uint16_t need;
@@ -498,6 +521,7 @@ bool mx_load_frame(mx_vm_t *vm, const uint8_t *frame, uint16_t frame_len)
     return true;
 }
 
+/* Execute one loaded MATHVM program until RET, HALT, or error. */
 bool mx_exec(mx_vm_t *vm)
 {
     while (vm->pc < vm->hdr.prog_len)
@@ -995,6 +1019,7 @@ bool mx_exec(mx_vm_t *vm)
     return false;
 }
 
+/* Firmware entry point for OS $80: fetch frame, execute VM, and return output. */
 bool mathvm_api_op(void)
 {
     mx_vm_t vm;

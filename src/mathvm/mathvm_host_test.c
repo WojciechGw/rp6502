@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Print one byte buffer as space-separated hexadecimal values. */
 static void dump_hex(const uint8_t *data, size_t size)
 {
     size_t i;
@@ -29,6 +30,7 @@ static void dump_hex(const uint8_t *data, size_t size)
     putchar('\n');
 }
 
+/* Fill locals for the M3V3L frame-building example. */
 static void fill_m3v3l_locals(mx_word_t *locals)
 {
     /* mat3 row-major */
@@ -48,6 +50,7 @@ static void fill_m3v3l_locals(mx_word_t *locals)
     locals[11].f32 = 30.0f;
 }
 
+/* Fill locals for the SPR2L frame-building examples. */
 static void fill_spr2l_locals(mx_word_t *locals)
 {
     /* affine 2x3 */
@@ -65,6 +68,7 @@ static void fill_spr2l_locals(mx_word_t *locals)
     locals[9].f32 = 0.5f;
 }
 
+/* Print the expected 6502-side OS $80 call sequence for one frame. */
 static void print_os80_call_sequence(void)
 {
     puts("6502 call sequence for OS $80:");
@@ -75,6 +79,7 @@ static void print_os80_call_sequence(void)
     puts("  5. Pull 4*X bytes from $FFEC as little-endian words.");
 }
 
+/* Initialize a valid baseline frame header for one test case. */
 static void init_valid_header(mx_header_t *hdr,
                               uint8_t prog_len,
                               uint8_t local_words,
@@ -96,6 +101,7 @@ static void init_valid_header(mx_header_t *hdr,
     hdr->reserved = 0;
 }
 
+/* Build one complete frame from header, locals, and bytecode. */
 static void build_frame(mx_frame_builder_t *builder,
                         const mx_header_t *hdr,
                         const mx_word_t *locals,
@@ -109,6 +115,7 @@ static void build_frame(mx_frame_builder_t *builder,
     assert(mx_frame_builder_append_bytes(builder, program, program_size));
 }
 
+/* Build, load, and execute one frame in a local VM instance. */
 static void execute_frame(mx_vm_t *vm,
                           mx_header_t hdr,
                           const mx_word_t *locals,
@@ -123,6 +130,7 @@ static void execute_frame(mx_vm_t *vm,
     assert(mx_exec(vm));
 }
 
+/* Store one host double64 value into two local VM words. */
 static void store_d64(mx_word_t *locals, uint8_t idx, double value)
 {
     uint64_t bits;
@@ -132,6 +140,7 @@ static void store_d64(mx_word_t *locals, uint8_t idx, double value)
     locals[idx + 1].u32 = (uint32_t)(bits >> 32);
 }
 
+/* Reconstruct one host double64 value from two VM words. */
 static double load_d64(const mx_word_t *words)
 {
     uint64_t bits = (uint64_t)words[0].u32 | ((uint64_t)words[1].u32 << 32);
@@ -141,6 +150,7 @@ static double load_d64(const mx_word_t *words)
     return value;
 }
 
+/* Assert that frame loading fails with the expected status code. */
 static void expect_load_error(const char *name,
                               mx_header_t hdr,
                               const mx_word_t *locals,
@@ -158,6 +168,7 @@ static void expect_load_error(const char *name,
     printf("Negative test passed: %s -> status=%u\n", name, (unsigned)vm.status);
 }
 
+/* Assert that execution fails with the expected status code. */
 static void expect_exec_error(const char *name,
                               mx_header_t hdr,
                               const mx_word_t *locals,
@@ -176,6 +187,7 @@ static void expect_exec_error(const char *name,
     printf("Negative test passed: %s -> status=%u\n", name, (unsigned)vm.status);
 }
 
+/* Test host-side frame building for the M3V3L example. */
 static void test_m3v3l(void)
 {
     mx_frame_builder_t builder;
@@ -236,6 +248,7 @@ static void test_m3v3l(void)
     puts("  if executed, output should be [140.0, 320.0, 500.0].");
 }
 
+/* Test host-side frame building for the SPR2L bbox example. */
 static void test_spr2l(void)
 {
     mx_frame_builder_t builder;
@@ -296,6 +309,7 @@ static void test_spr2l(void)
     puts("  if executed, bbox should be [92.0, 46.0, 108.0, 54.0].");
 }
 
+/* Test host-side frame building for the SPR2L corners example. */
 static void test_spr2l_corners(void)
 {
     mx_frame_builder_t builder;
@@ -357,6 +371,7 @@ static void test_spr2l_corners(void)
     puts("    [92.0, 46.0, 108.0, 46.0, 108.0, 54.0, 92.0, 54.0]");
 }
 
+/* Test execution of the opcode set that replaces the legacy mth operations. */
 static void test_mth_compat_execution(void)
 {
     mx_vm_t vm;
@@ -446,6 +461,7 @@ static void test_mth_compat_execution(void)
     puts("MATHVM host-side test: mth compatibility execution passed.");
 }
 
+/* Test negative v1 load-time and execution-time error cases. */
 static void test_negative_v1(void)
 {
     mx_header_t hdr;
@@ -512,6 +528,7 @@ static void test_negative_v1(void)
                       MX_ERR_BAD_LOCAL);
 }
 
+/* Run the complete host-side test suite and print frame examples. */
 int main(void)
 {
     printf("OS code: $%02X\n\n", RIA_OP_MATHVM);

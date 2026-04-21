@@ -16,6 +16,7 @@ typedef unsigned int (*ria_wait_fn_t)(void);
 static const ria_wait_fn_t ria_wait = (ria_wait_fn_t)0xFFF1;
 static uint8_t mx_batch_frame[MX_MAX_FRAME];
 
+/* Builds a result object that carries only an error status and no payload. */
 static mx_client_result_t mx_client_error_result(uint8_t status)
 {
     mx_client_result_t result;
@@ -25,6 +26,9 @@ static mx_client_result_t mx_client_error_result(uint8_t status)
     return result;
 }
 
+/* Returns the index of the highest set bit in a non-zero unsigned value.
+ * The result is used to normalize integer magnitudes into float32 format
+ * without relying on a host-side floating-point implementation. */
 static uint8_t mx_u32_msb_index(uint32_t value)
 {
     uint8_t index = 0u;
@@ -34,6 +38,9 @@ static uint8_t mx_u32_msb_index(uint32_t value)
     return index;
 }
 
+/* Converts an unsigned fixed-point magnitude to raw float32 bits.
+ * `frac_bits` specifies how many low bits of `magnitude` belong to the
+ * fractional part, so the function can encode both integers and Q8.8 values. */
 static uint32_t mx_u32_to_f32_bits_scaled(uint32_t magnitude, uint8_t frac_bits)
 {
     uint8_t msb;
@@ -53,6 +60,8 @@ static uint32_t mx_u32_to_f32_bits_scaled(uint32_t magnitude, uint8_t frac_bits)
     return ((uint32_t)exponent << 23) | (mantissa & 0x007FFFFFu);
 }
 
+/* Converts a signed fixed-point integer to one MATHVM word containing raw
+ * float32 bits. The caller controls the fixed-point scale via `frac_bits`. */
 static mx_word_t mx_word_from_i32_scaled(int32_t value, uint8_t frac_bits)
 {
     mx_word_t word;
@@ -71,6 +80,8 @@ static mx_word_t mx_word_from_i32_scaled(int32_t value, uint8_t frac_bits)
     return word;
 }
 
+/* Writes one 32-bit little-endian value to XRAM using the sequential MMIO
+ * access port exposed by RIA. */
 static void mx_xram_write_u32_seq(uint16_t addr, uint32_t value)
 {
     RIA_ADDR0 = addr;
@@ -81,6 +92,8 @@ static void mx_xram_write_u32_seq(uint16_t addr, uint32_t value)
     RIA_RW0 = (uint8_t)(value >> 24);
 }
 
+/* Reads one 32-bit little-endian value from XRAM using the sequential MMIO
+ * access port exposed by RIA. */
 static uint32_t mx_xram_read_u32_seq(uint16_t addr)
 {
     uint32_t value;
@@ -94,17 +107,20 @@ static uint32_t mx_xram_read_u32_seq(uint16_t addr)
     return value;
 }
 
+/* Appends one byte to a frame buffer and advances its current length. */
 static void mx_append_u8(uint8_t *frame, uint16_t *len, uint8_t value)
 {
     frame[(*len)++] = value;
 }
 
+/* Appends one 16-bit little-endian value to a frame buffer. */
 static void mx_append_u16le(uint8_t *frame, uint16_t *len, uint16_t value)
 {
     frame[(*len)++] = (uint8_t)(value & 0xFFu);
     frame[(*len)++] = (uint8_t)(value >> 8);
 }
 
+/* Appends one 32-bit little-endian value to a frame buffer. */
 static void mx_append_u32le(uint8_t *frame, uint16_t *len, uint32_t value)
 {
     frame[(*len)++] = (uint8_t)(value & 0xFFu);
@@ -113,6 +129,9 @@ static void mx_append_u32le(uint8_t *frame, uint16_t *len, uint32_t value)
     frame[(*len)++] = (uint8_t)(value >> 24);
 }
 
+/* Appends a complete MATHVM frame header using the current ABI layout.
+ * The header fields are written exactly as the firmware expects them on
+ * XSTACK, including the trailing reserved word. */
 static void mx_append_header(uint8_t *frame,
                              uint16_t *len,
                              uint8_t flags,
@@ -138,6 +157,7 @@ static void mx_append_header(uint8_t *frame,
     mx_append_u16le(frame, len, 0x0000u);
 }
 
+/* Appends a contiguous array of MATHVM words to a frame buffer. */
 static void mx_append_words(uint8_t *frame,
                             uint16_t *len,
                             const mx_word_t *words,
@@ -149,12 +169,18 @@ static void mx_append_words(uint8_t *frame,
         mx_append_u32le(frame, len, words[i].u32);
 }
 
+/* Pushes a finished frame onto XSTACK in reverse byte order.
+ * RIA consumes frames from the top of the stack, so the last byte must be
+ * written first and the first byte last. */
 static void mx_push_frame_reverse(const uint8_t *frame, uint16_t frame_len)
 {
     while (frame_len > 0)
         RIA_XSTACK = frame[--frame_len];
 }
 
+/* Discards a number of 32-bit words from XSTACK without decoding them.
+ * This is used when the caller did not provide an output buffer or when the
+ * buffer is too small for the produced payload. */
 static void mx_drain_words(uint8_t word_count)
 {
     while (word_count-- > 0)
@@ -166,6 +192,8 @@ static void mx_drain_words(uint8_t word_count)
     }
 }
 
+/* Reads a number of 32-bit little-endian result words back from XSTACK and
+ * stores them into the caller's output buffer. */
 static void mx_read_words(mx_word_t *out, uint8_t word_count)
 {
     uint8_t i;
@@ -181,6 +209,113 @@ static void mx_read_words(mx_word_t *out, uint8_t word_count)
     }
 }
 
+/* Parses one signed decimal string into Q16.16 fixed-point form.
+ * The parser accepts an optional sign and up to four fractional digits, which
+ * keeps the conversion precise enough for human-entered demo values while
+ * staying inside plain 32-bit integer arithmetic. */
+static int mx_parse_decimal_q16_16(const char *text, int32_t *out_value)
+{
+    uint8_t negative = 0u;
+    uint8_t got_digit = 0u;
+    uint8_t frac_digits = 0u;
+    uint32_t whole = 0u;
+    uint32_t frac = 0u;
+    uint32_t scale = 1u;
+    uint32_t frac_scaled;
+    uint32_t combined;
+
+    if (text == 0 || out_value == 0)
+        return 0;
+
+    if (*text == '-')
+    {
+        negative = 1u;
+        ++text;
+    }
+    else if (*text == '+')
+    {
+        ++text;
+    }
+
+    while (*text >= '0' && *text <= '9')
+    {
+        got_digit = 1u;
+        if (whole > 32767u)
+            return 0;
+        whole = whole * 10u + (uint32_t)(*text - '0');
+        if (whole > 32767u)
+            return 0;
+        ++text;
+    }
+
+    if (*text == '.')
+    {
+        ++text;
+        while (*text >= '0' && *text <= '9')
+        {
+            got_digit = 1u;
+            if (frac_digits < 4u)
+            {
+                frac = frac * 10u + (uint32_t)(*text - '0');
+                scale *= 10u;
+                ++frac_digits;
+            }
+            ++text;
+        }
+    }
+
+    if (!got_digit || *text != '\0')
+        return 0;
+
+    frac_scaled = (uint32_t)((frac * 65536u + (scale / 2u)) / scale);
+    combined = (whole << 16) + frac_scaled;
+
+    if (!negative)
+    {
+        if (combined > 0x7FFFFFFFu)
+            return 0;
+        *out_value = (int32_t)combined;
+    }
+    else
+    {
+        if (combined > 0x80000000u)
+            return 0;
+        if (combined == 0x80000000u)
+            *out_value = (int32_t)0x80000000u;
+        else
+            *out_value = -(int32_t)combined;
+    }
+
+    return 1;
+}
+
+/* Appends one character to a bounded text buffer and keeps room for a final
+ * terminating NUL byte. */
+static void mx_buffer_putc(char **cursor, char *end, char value)
+{
+    if (*cursor < end)
+        *(*cursor)++ = value;
+}
+
+/* Appends one unsigned decimal integer to a bounded text buffer. */
+static void mx_buffer_put_u32(char **cursor, char *end, uint32_t value)
+{
+    char digits[10];
+    uint8_t count = 0u;
+
+    do
+    {
+        digits[count++] = (char)('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u);
+
+    while (count > 0u)
+        mx_buffer_putc(cursor, end, digits[--count]);
+}
+
+/* Executes one raw MATHVM frame through OS $80.
+ * The function handles XSTACK push/pop details, waits for completion through
+ * the RIA entry point, and copies any direct return words into `out`. */
 mx_client_result_t mx_client_call_frame(const uint8_t *frame,
                                         uint16_t frame_len,
                                         mx_word_t *out,
@@ -209,6 +344,146 @@ mx_client_result_t mx_client_call_frame(const uint8_t *frame,
     return result;
 }
 
+/* Builds and executes a tiny scalar program that computes
+ * sqrt(a*a + b*b) from two human-entered decimal strings. */
+mx_client_result_t mx_client_pitagoras_i16(const char *a_text,
+                                           const char *b_text,
+                                           mx_word_t out[1])
+{
+    int32_t a_q16_16;
+    int32_t b_q16_16;
+    uint8_t frame[48];
+    uint16_t len = 0u;
+
+    if (out == 0)
+        return mx_client_error_result(MX_ERR_HEADER);
+    if (!mx_parse_decimal_q16_16(a_text, &a_q16_16))
+        return mx_client_error_result(MX_ERR_HEADER);
+    if (!mx_parse_decimal_q16_16(b_text, &b_q16_16))
+        return mx_client_error_result(MX_ERR_HEADER);
+
+    mx_append_header(frame, &len, 0x00u, 26u, 0u, 1u, 4u, 0xFFFFu, 0xFFFFu, 0x0001u);
+
+    mx_append_u8(frame, &len, MX_PUSHF);
+    mx_append_u32le(frame, &len, mx_word_from_i32_scaled(a_q16_16, 16u).u32);
+    mx_append_u8(frame, &len, MX_PUSHF);
+    mx_append_u32le(frame, &len, mx_word_from_i32_scaled(a_q16_16, 16u).u32);
+    mx_append_u8(frame, &len, MX_FMUL);
+
+    mx_append_u8(frame, &len, MX_PUSHF);
+    mx_append_u32le(frame, &len, mx_word_from_i32_scaled(b_q16_16, 16u).u32);
+    mx_append_u8(frame, &len, MX_PUSHF);
+    mx_append_u32le(frame, &len, mx_word_from_i32_scaled(b_q16_16, 16u).u32);
+    mx_append_u8(frame, &len, MX_FMUL);
+
+    mx_append_u8(frame, &len, MX_FADD);
+    mx_append_u8(frame, &len, MX_FSQRT);
+    mx_append_u8(frame, &len, MX_RET);
+    mx_append_u8(frame, &len, 0x01);
+
+    return mx_client_call_frame(frame, len, out, 1u);
+}
+
+/* Converts raw float32 bits to a signed Q16.16 fixed-point approximation. */
+int32_t mx_client_f32_to_q16_16(uint32_t bits)
+{
+    uint32_t sign = bits >> 31;
+    uint32_t exp_raw = (bits >> 23) & 0xFFu;
+    uint32_t frac = bits & 0x007FFFFFu;
+    uint32_t sig;
+    int16_t shift;
+    uint32_t magnitude;
+
+    if (exp_raw == 0u)
+    {
+        if (frac == 0u)
+            return 0;
+        sig = frac;
+        shift = -133;
+    }
+    else
+    {
+        sig = 0x00800000u | frac;
+        shift = (int16_t)exp_raw - 134;
+    }
+
+    if (shift >= 0)
+    {
+        if (shift > 7)
+            magnitude = 0x7FFFFFFFu;
+        else
+            magnitude = sig << shift;
+    }
+    else
+    {
+        uint8_t rshift = (uint8_t)(-shift);
+
+        if (rshift >= 32u)
+            magnitude = 0u;
+        else
+            magnitude = (sig + (1u << (rshift - 1u))) >> rshift;
+    }
+
+    if (sign == 0u)
+        return (int32_t)magnitude;
+    if (magnitude == 0x80000000u)
+        return (int32_t)0x80000000u;
+    return -(int32_t)magnitude;
+}
+
+/* Formats one signed Q16.16 value as a decimal string with four fractional
+ * digits. */
+void mx_client_format_q16_16(char *buffer, uint8_t buffer_size, int32_t value)
+{
+    char *cursor;
+    char *end;
+    uint32_t magnitude;
+    uint32_t whole;
+    uint32_t frac;
+
+    if (buffer == 0 || buffer_size == 0u)
+        return;
+
+    cursor = buffer;
+    end = buffer + buffer_size - 1u;
+
+    if (value < 0)
+    {
+        mx_buffer_putc(&cursor, end, '-');
+        magnitude = (uint32_t)(-(value + 1)) + 1u;
+    }
+    else
+    {
+        magnitude = (uint32_t)value;
+    }
+
+    whole = magnitude >> 16;
+    frac = (((magnitude & 0xFFFFu) * 10000u) + 32768u) >> 16;
+    if (frac >= 10000u)
+    {
+        ++whole;
+        frac -= 10000u;
+    }
+
+    mx_buffer_put_u32(&cursor, end, whole);
+    mx_buffer_putc(&cursor, end, '.');
+    mx_buffer_putc(&cursor, end, (char)('0' + ((frac / 1000u) % 10u)));
+    mx_buffer_putc(&cursor, end, (char)('0' + ((frac / 100u) % 10u)));
+    mx_buffer_putc(&cursor, end, (char)('0' + ((frac / 10u) % 10u)));
+    mx_buffer_putc(&cursor, end, (char)('0' + (frac % 10u)));
+    *cursor = '\0';
+}
+
+/* Formats one raw float32 result word as a decimal string with four
+ * fractional digits. */
+void mx_client_format_f32(char *buffer, uint8_t buffer_size, mx_word_t value)
+{
+    mx_client_format_q16_16(buffer, buffer_size, mx_client_f32_to_q16_16(value.u32));
+}
+
+/* Uploads an array of signed integer vec3 values to XRAM in the exact record
+ * layout expected by the batch projection kernel: three float32 words per
+ * element stored as x, y, z. */
 void mx_client_xram_write_vec3i_array(uint16_t xram_addr,
                                       const mx_vec3i_t *vecs,
                                       uint16_t count)
@@ -226,6 +501,8 @@ void mx_client_xram_write_vec3i_array(uint16_t xram_addr,
     }
 }
 
+/* Reads packed int16 screen-space points from XRAM into a friendly array of
+ * `mx_point2i_t` records. */
 void mx_client_xram_read_point2i_array(uint16_t xram_addr,
                                        mx_point2i_t *points,
                                        uint16_t count)
@@ -242,6 +519,9 @@ void mx_client_xram_read_point2i_array(uint16_t xram_addr,
     }
 }
 
+/* Converts a batch descriptor into a concrete binary frame and executes it.
+ * This is the generic client-side batching layer used by higher-level
+ * helpers that want XRAM-backed processing without manually assembling bytes. */
 mx_client_result_t mx_client_call_batch(const mx_client_batch_desc_t *desc,
                                         mx_word_t *out,
                                         uint8_t out_cap_words)
@@ -288,6 +568,9 @@ mx_client_result_t mx_client_call_batch(const mx_client_batch_desc_t *desc,
     return mx_client_call_frame(mx_batch_frame, frame_len, out, out_cap_words);
 }
 
+/* Executes the fixed M3V3L kernel by building the complete frame locally.
+ * The matrix and vector are copied into the locals area and the bytecode
+ * returns the three transformed float32 components directly through XSTACK. */
 mx_client_result_t mx_client_m3v3l(const mx_word_t mat3[9],
                                    const mx_word_t vec3[3],
                                    mx_word_t out[3])
@@ -307,6 +590,9 @@ mx_client_result_t mx_client_m3v3l(const mx_word_t mat3[9],
     return mx_client_call_frame(frame, len, out, 3u);
 }
 
+/* Executes the sprite transform kernel in bounding-box mode.
+ * The helper packs the affine transform and sprite descriptor into locals and
+ * returns four float32 values describing the resulting screen-space box. */
 mx_client_result_t mx_client_spr2l_bbox(const mx_word_t affine2x3[6],
                                         const mx_word_t sprite[4],
                                         mx_word_t out[4])
@@ -327,6 +613,9 @@ mx_client_result_t mx_client_spr2l_bbox(const mx_word_t affine2x3[6],
     return mx_client_call_frame(frame, len, out, 4u);
 }
 
+/* Executes the sprite transform kernel in corner-output mode.
+ * The helper returns eight float32 values representing four transformed
+ * sprite corners. */
 mx_client_result_t mx_client_spr2l_corners(const mx_word_t affine2x3[6],
                                            const mx_word_t sprite[4],
                                            mx_word_t out[8])
@@ -347,6 +636,9 @@ mx_client_result_t mx_client_spr2l_corners(const mx_word_t affine2x3[6],
     return mx_client_call_frame(frame, len, out, 8u);
 }
 
+/* Executes the MX_M3V3P2X batch kernel from already prepared float32 locals.
+ * This is the lowest-level projection helper that still hides frame assembly
+ * while leaving matrix and camera preparation to the caller. */
 mx_client_result_t mx_client_m3v3p2x(const mx_word_t mat3[9],
                                      const mx_word_t camera[3],
                                      uint16_t xram_in,
@@ -376,6 +668,9 @@ mx_client_result_t mx_client_m3v3p2x(const mx_word_t mat3[9],
     return mx_client_call_batch(&desc, NULL, 0u);
 }
 
+/* Executes the MX_M3V3P2X batch kernel from Q8.8 matrix coefficients and
+ * integer camera parameters. The helper performs the required fixed-point to
+ * float32 conversion on the caller's behalf. */
 mx_client_result_t mx_client_m3v3p2x_q8_8(const int16_t mat3_q8_8[9],
                                           int16_t persp_d,
                                           int16_t screen_cx,
@@ -397,6 +692,7 @@ mx_client_result_t mx_client_m3v3p2x_q8_8(const int16_t mat3_q8_8[9],
     return mx_client_m3v3p2x(mat3_words, camera_words, xram_in, xram_out, count);
 }
 
+/* Multiplies two Q8.8 fixed-point values and rounds the result back to Q8.8. */
 static int16_t mx_mul_q8_8(int16_t a, int16_t b)
 {
     int32_t product = (int32_t)a * (int32_t)b;
@@ -408,6 +704,9 @@ static int16_t mx_mul_q8_8(int16_t a, int16_t b)
     return (int16_t)(-((product + 128) >> 8));
 }
 
+/* Returns an approximate sine in Q8.8 form for an integer angle in degrees.
+ * The function uses a 0..90 degree lookup table and symmetry rules for the
+ * remaining quadrants to avoid floating-point math on cc65. */
 static int16_t mx_sin_deg_q8_8(int angle_deg)
 {
     static const uint16_t sin_tab[91] = {
@@ -437,11 +736,15 @@ static int16_t mx_sin_deg_q8_8(int angle_deg)
     return (int16_t)(-(int16_t)sin_tab[360 - angle_deg]);
 }
 
+/* Returns an approximate cosine in Q8.8 form for an integer angle in degrees. */
 static int16_t mx_cos_deg_q8_8(int angle_deg)
 {
     return mx_sin_deg_q8_8(angle_deg + 90);
 }
 
+/* Builds the standard Y-axis rotation plus 30-degree tilt matrix and executes
+ * the MX_M3V3P2X batch kernel with that transform. This gives cc65 callers a
+ * compact, integer-only way to project rotating wireframe geometry. */
 mx_client_result_t mx_client_m3v3p2x_yrot30(int angle_deg,
                                             int16_t persp_d,
                                             int16_t screen_cx,
@@ -475,6 +778,10 @@ mx_client_result_t mx_client_m3v3p2x_yrot30(int angle_deg,
                                    count);
 }
 
+/* Complete high-level batch helper for the common demo path.
+ * The function validates the XRAM window, uploads integer vec3 input points,
+ * executes the built-in Y-rotation projection kernel, and reads back packed
+ * int16 screen coordinates into a caller-friendly array. */
 mx_client_result_t mx_client_project_vec3i_batch_yrot30(int angle_deg,
                                                         int16_t persp_d,
                                                         int16_t screen_cx,

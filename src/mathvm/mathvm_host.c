@@ -7,6 +7,7 @@
 #include "mathvm/mathvm.h"
 #include <string.h>
 
+/* Reserve space for additional bytes in the frame builder buffer. */
 static bool mx_frame_builder_reserve(mx_frame_builder_t *builder, size_t size)
 {
     if (builder == NULL)
@@ -16,6 +17,7 @@ static bool mx_frame_builder_reserve(mx_frame_builder_t *builder, size_t size)
     return true;
 }
 
+/* Reset the frame builder to an empty state. */
 void mx_frame_builder_reset(mx_frame_builder_t *builder)
 {
     if (builder == NULL)
@@ -23,6 +25,7 @@ void mx_frame_builder_reset(mx_frame_builder_t *builder)
     builder->len = 0;
 }
 
+/* Append an arbitrary raw byte block to the builder buffer. */
 bool mx_frame_builder_append_bytes(mx_frame_builder_t *builder, const void *data, size_t size)
 {
     if (data == NULL)
@@ -35,11 +38,13 @@ bool mx_frame_builder_append_bytes(mx_frame_builder_t *builder, const void *data
     return true;
 }
 
+/* Append one raw byte to the builder buffer. */
 bool mx_frame_builder_append_u8(mx_frame_builder_t *builder, uint8_t value)
 {
     return mx_frame_builder_append_bytes(builder, &value, sizeof(value));
 }
 
+/* Append one 16-bit little-endian value to the builder buffer. */
 bool mx_frame_builder_append_u16(mx_frame_builder_t *builder, uint16_t value)
 {
     uint8_t raw[2];
@@ -49,6 +54,7 @@ bool mx_frame_builder_append_u16(mx_frame_builder_t *builder, uint16_t value)
     return mx_frame_builder_append_bytes(builder, raw, sizeof(raw));
 }
 
+/* Append one 32-bit little-endian value to the builder buffer. */
 bool mx_frame_builder_append_u32(mx_frame_builder_t *builder, uint32_t value)
 {
     uint8_t raw[4];
@@ -60,6 +66,7 @@ bool mx_frame_builder_append_u32(mx_frame_builder_t *builder, uint32_t value)
     return mx_frame_builder_append_bytes(builder, raw, sizeof(raw));
 }
 
+/* Append one float32 value encoded as a 32-bit VM word. */
 bool mx_frame_builder_append_f32(mx_frame_builder_t *builder, float value)
 {
     uint32_t raw;
@@ -68,6 +75,7 @@ bool mx_frame_builder_append_f32(mx_frame_builder_t *builder, float value)
     return mx_frame_builder_append_u32(builder, raw);
 }
 
+/* Append an array of VM words to the builder buffer. */
 bool mx_frame_builder_append_words(mx_frame_builder_t *builder, const mx_word_t *words, size_t count)
 {
     size_t i;
@@ -80,6 +88,7 @@ bool mx_frame_builder_append_words(mx_frame_builder_t *builder, const mx_word_t 
     return true;
 }
 
+/* Append one complete MATHVM binary header to the builder buffer. */
 bool mx_frame_builder_append_header(mx_frame_builder_t *builder, const mx_header_t *header)
 {
     if (header == NULL)
@@ -92,6 +101,7 @@ const uint8_t *mx_frame_builder_data(const mx_frame_builder_t *builder)
     return builder == NULL ? NULL : builder->data;
 }
 
+/* Return the current builder size in bytes. */
 uint16_t mx_frame_builder_size(const mx_frame_builder_t *builder)
 {
     return builder == NULL ? 0 : builder->len;

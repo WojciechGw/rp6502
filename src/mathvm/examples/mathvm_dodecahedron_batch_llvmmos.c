@@ -1,8 +1,12 @@
 /*
- * MATHVM batch dodecahedron animation.
+ * Float-friendly llvm-mos MATHVM batch dodecahedron animation.
  *
  * One MATHVM call per frame projects all 20 vertices of a regular
  * dodecahedron from XRAM input records to packed int16 x/y output records.
+ *
+ * Unlike the cc65 example, this version keeps geometry and transform math in
+ * ordinary float form on the caller side and uses the llvm-mos client layer
+ * to pack data into the current MATHVM ABI.
  *
  * SPDX-License-Identifier: BSD-3-Clause
  * SPDX-License-Identifier: Unlicense
@@ -13,9 +17,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <time.h>
 
-#include "mathvm_client.h"
+#include "mathvm/mathvm_client_llvmmos.h"
 
 #define KEYBOARD_ADDR 0xFFE0u
 
@@ -51,30 +56,30 @@
 #define CLEAR_MODE_ERASE_GEOMETRY 2
 
 #ifndef DODECA_CLEAR_MODE
-#define DODECA_CLEAR_MODE CLEAR_MODE_FULL
+#define DODECA_CLEAR_MODE CLEAR_MODE_DIRTY_SPANS
 #endif
 
-static const mx_vec3i_t verts[DODECA_VERTS] = {
-    {-28, -28, -28},
-    { 28, -28, -28},
-    { 28,  28, -28},
-    {-28,  28, -28},
-    {-28, -28,  28},
-    { 28, -28,  28},
-    { 28,  28,  28},
-    {-28,  28,  28},
-    {  0, -17, -45},
-    {  0,  17, -45},
-    {  0, -17,  45},
-    {  0,  17,  45},
-    {-17, -45,   0},
-    { 17, -45,   0},
-    {-17,  45,   0},
-    { 17,  45,   0},
-    {-45,   0, -17},
-    { 45,   0, -17},
-    {-45,   0,  17},
-    { 45,   0,  17},
+static const mx_vec3f_t verts[DODECA_VERTS] = {
+    {-28.0f, -28.0f, -28.0f},
+    { 28.0f, -28.0f, -28.0f},
+    { 28.0f,  28.0f, -28.0f},
+    {-28.0f,  28.0f, -28.0f},
+    {-28.0f, -28.0f,  28.0f},
+    { 28.0f, -28.0f,  28.0f},
+    { 28.0f,  28.0f,  28.0f},
+    {-28.0f,  28.0f,  28.0f},
+    {  0.0f, -17.0f, -45.0f},
+    {  0.0f,  17.0f, -45.0f},
+    {  0.0f, -17.0f,  45.0f},
+    {  0.0f,  17.0f,  45.0f},
+    {-17.0f, -45.0f,   0.0f},
+    { 17.0f, -45.0f,   0.0f},
+    {-17.0f,  45.0f,   0.0f},
+    { 17.0f,  45.0f,   0.0f},
+    {-45.0f,   0.0f, -17.0f},
+    { 45.0f,   0.0f, -17.0f},
+    {-45.0f,   0.0f,  17.0f},
+    { 45.0f,   0.0f,  17.0f},
 };
 
 static const unsigned char edges[DODECA_EDGES][2] = {
@@ -257,7 +262,7 @@ static void report_projection_time_sample(clock_t elapsed)
     sec_frac = ((avg_ticks % (unsigned long)CLOCKS_PER_SEC) * 1000000UL)
              / (unsigned long)CLOCKS_PER_SEC;
 
-    printf("mx_client_project_vec3i_batch_yrot30 avg: %lu.%06lu s\n",
+    printf("mx_client_project_vec3f_batch_f32 avg: %lu.%06lu s\n",
            sec_whole,
            sec_frac);
 
@@ -518,18 +523,28 @@ static bool precompute_frames(void)
     precompute_progress_begin();
     for (angle = 0; angle < DODECA_FRAMES; ++angle)
     {
+        const float radians = (float)angle * (3.14159265358979323846f / 180.0f);
+        const float sin_a = sinf(radians);
+        const float cos_a = cosf(radians);
+        const float sin30 = 0.5f;
+        const float cos30 = 0.86602540378443864676f;
+        const float mat3[9] = {
+             cos_a,            0.0f,           sin_a,
+             sin_a * sin30,    cos30,         -cos_a * sin30,
+            -sin_a * cos30,    sin30,          cos_a * cos30
+        };
         mx_client_result_t call;
         clock_t t0;
 
         t0 = clock();
-        call = mx_client_project_vec3i_batch_yrot30(angle,
-                                                    200,
-                                                    320,
-                                                    180,
-                                                    XRAM_VERT_IN,
-                                                    verts,
-                                                    precomputed_frames[angle],
-                                                    DODECA_VERTS);
+        call = mx_client_project_vec3f_batch_f32(mat3,
+                                                 200.0f,
+                                                 320.0f,
+                                                 180.0f,
+                                                 XRAM_VERT_IN,
+                                                 verts,
+                                                 precomputed_frames[angle],
+                                                 DODECA_VERTS);
         precompute_progress_update((uint16_t)(angle + 1));
         report_projection_time_sample(clock() - t0);
         if (call.status != MX_OK || call.out_words != 0u)
