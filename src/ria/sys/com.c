@@ -311,6 +311,12 @@ void com_init(void)
     hw_clear_bits(&uart_get_hw(COM_UART)->rsr, UART_UARTRSR_BITS);
 }
 
+void com_stop(void)
+{
+    com_rx_char = -1;
+    com_rx_head = com_rx_tail = 0;
+}
+
 void com_task(void)
 {
     // TX: drain UART buffer to hardware
