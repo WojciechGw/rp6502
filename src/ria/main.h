@@ -11,8 +11,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define NDEBUG
-
 /* This manages the main loop for the operating system.
  * Device drivers (everything is a device driver) are notified of various
  * events like init, task, run, stop, break, pre_reclock, and post_reclock.
