@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -39,7 +39,7 @@ bool pro_api_exec(void);
 /* Launcher: when set, pro_stop() will re-exec the launcher ROM.
  * The chain breaks when the launcher itself stops or on pro_break().
  */
-bool pro_get_launcher(void);
+bool pro_has_launcher(void);
 void pro_set_launcher(bool is_launcher);
 bool pro_is_launcher(void);
 int16_t pro_get_exit_code(void);

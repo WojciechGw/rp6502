@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -34,7 +34,6 @@
 #include "hid/kbd_se.h"
 #include "hid/kbd_us.h"
 
-#define KBD_LAYOUT_MAX_NAME_SIZE 16
 #define KBD_LAYOUTS                                \
     X(DK, "DK", "Denmark")                         \
     X(DE, "DE", "Germany")                         \

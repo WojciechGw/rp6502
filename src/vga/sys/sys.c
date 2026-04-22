@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
 #include <pico.h>
 
-__in_flash("vga_sys_sys") static const char SYS_VERSION[] =
+__in_flash("SYS_VERSION") static const char SYS_VERSION[] =
     "VGA "
 #if RP6502_VERSION_EMPTY
     __DATE__ " " __TIME__

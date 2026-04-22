@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -26,7 +26,6 @@
 #include "net/cyw.h"
 #include "net/mdm.h"
 #include "net/ntp.h"
-#include "net/tel.h"
 #include "net/wfi.h"
 #include "str/rln.h"
 #include "sys/com.h"
@@ -80,7 +79,6 @@ static void init(void)
     rom_init();
     clk_init();
     mdm_init();
-    tel_init();
     rln_init();
 
     // USB near end for boot enum timing
@@ -110,7 +108,6 @@ void main_task(void)
     ble_task();
     led_task();
     mdm_task();
-    tel_task();
     ram_task();
 }
 
@@ -187,7 +184,6 @@ void main_reclock(uint16_t clkdiv_int, uint8_t clkdiv_frac)
 // PIX XREG writes to the RIA device will dispatch here.
 bool main_xreg(uint8_t chan, uint8_t addr, uint16_t word)
 {
-    (void)addr;
     switch (chan * 256 + addr)
     {
     // Channel 0 for human interface devices.
@@ -325,7 +321,7 @@ void main_stop(void)
     cpu_stop(); // Pull down RESB
     if (main_state == starting)
         main_state = stopped;
-    if (main_state != stopped)
+    else if (main_state != stopped)
         main_state = stopping;
 }
 
@@ -348,12 +344,7 @@ int main(void)
         main_task();
         task();
         if (is_breaking)
-        {
-            if (main_state == starting)
-                main_state = stopped;
-            if (main_state == running)
-                main_state = stopping;
-        }
+            main_stop();
         if (main_state == starting)
         {
             run();
