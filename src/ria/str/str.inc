@@ -42,9 +42,9 @@ X(STR_STATUS_USB, "USB : %d %s, %d %s, %d %s, %d %s, %d %s, %d %s\n")
 X(STR_STATUS_MSC, "%s: %s %.8s %.16s rev %.4s\n")
 X(STR_STATUS_CDC, "%s: %s %s\n")
 
-// ANSI to reset the terminal at boot
+// ANSI to reset the terminal at boot. Extra \33[2J for minicom.
 X(STR_SYS_TERM_RESET, "\30\33[0m\33[?25h\n");
-X(STR_SYS_FULL_TERM_RESET, "\30\33c\n");
+X(STR_SYS_FULL_TERM_RESET, "\30\33c\33[2J\n");
 
 // Monitor prompts
 X(STR_MON_PROMPT_NEWLINE, "\30\33[0m\33[?25h\n]")

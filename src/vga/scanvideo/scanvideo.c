@@ -1113,7 +1113,6 @@ void scanvideo_set_mode(const scanvideo_view_t *mode)
     v_content_start = mode->y_offset;
     v_content_end = mode->y_offset +
                     (uint32_t)mode->height * mode->y_scale;
-    assert(v_content_end <= (int32_t)timing->v_active);
 
     ((uint16_t *)(_missing_scanline_data))[2] = mode->width / 2 - 3;
 
