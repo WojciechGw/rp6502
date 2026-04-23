@@ -45,6 +45,8 @@ typedef enum
     ansi_state_CSI_equal,
     ansi_state_CSI_greater,
     ansi_state_CSI_question,
+    ansi_state_OSC,
+    ansi_state_OSC_esc,
 } ansi_state_t;
 
 typedef struct
@@ -76,7 +78,8 @@ typedef struct term_state
     bool cursor_is_inv;
     uint16_t fg_color;
     uint16_t bg_color;
-    uint16_t cursor_fg_color;
+    uint16_t default_fg_color;
+    uint16_t default_bg_color;
     uint16_t cursor_bg_color;
     uint8_t fg_color_index;
     uint8_t bg_color_index;
@@ -212,9 +215,10 @@ static void term_out_RIS(term_state_t *term)
     term->ansi_state = ansi_state_C0;
     term->fg_color_index = TERM_FG_COLOR_INDEX;
     term->bg_color_index = TERM_BG_COLOR_INDEX;
+    term->default_fg_color = color_256[TERM_FG_COLOR_INDEX];
+    term->default_bg_color = color_256[TERM_BG_COLOR_INDEX];
     term->fg_color = color_256[TERM_FG_COLOR_INDEX];
     term->bg_color = color_256[TERM_BG_COLOR_INDEX];
-    term->cursor_fg_color = color_256[TERM_BG_COLOR_INDEX];
     term->cursor_bg_color = color_256[TERM_FG_COLOR_INDEX];
     term->bold = false;
     term->blink = false;
@@ -289,9 +293,11 @@ static void term_state_set_height(term_state_t *term, uint8_t height)
     }
 }
 
-// Self-inverse swap: while lit, cursor_fg/bg_color hold the saved cell colors;
-// while unlit, they hold the configured cursor colors. Callers must force unlit
-// before touching cell state or cursor colors (com_out_chars already does this).
+// Self-inverse swap of one slot: while lit, cursor_bg_color holds the saved
+// cell bg; while unlit, it holds the configured cursor color. The cell's fg
+// is left untouched, so a glyph under the cursor renders in its own fg on
+// the cursor block. Callers must force unlit before touching cell state or
+// cursor_bg_color (com_out_chars already does this).
 static void term_cursor_set_inv(term_state_t *term, bool inv)
 {
     if (!term->cursor_enabled && inv)
@@ -301,10 +307,7 @@ static void term_cursor_set_inv(term_state_t *term, bool inv)
     term_data_t *term_ptr = term->ptr;
     if (term->x == term->width)
         term_ptr--;
-    uint16_t tmp = term_ptr->fg_color;
-    term_ptr->fg_color = term->cursor_fg_color;
-    term->cursor_fg_color = tmp;
-    tmp = term_ptr->bg_color;
+    uint16_t tmp = term_ptr->bg_color;
     term_ptr->bg_color = term->cursor_bg_color;
     term->cursor_bg_color = tmp;
     term->cursor_is_inv = inv;
@@ -362,8 +365,8 @@ static void term_out_SGR(term_state_t *term)
             term->blink = false;
             term->fg_color_index = TERM_FG_COLOR_INDEX;
             term->bg_color_index = TERM_BG_COLOR_INDEX;
-            term->fg_color = color_256[TERM_FG_COLOR_INDEX];
-            term->bg_color = color_256[TERM_BG_COLOR_INDEX];
+            term->fg_color = term->default_fg_color;
+            term->bg_color = term->default_bg_color;
             break;
         case 1: // bold intensity
             term->bold = true;
@@ -400,7 +403,12 @@ static void term_out_SGR(term_state_t *term)
             return;
         case 39:
             term->fg_color_index = TERM_FG_COLOR_INDEX;
-            if (!term->bold)
+            // When OSC 10 has overridden the default, the override wins and
+            // bypasses the bold-bright trick. Without an override, preserve
+            // the historical bold-bright-on-default behavior.
+            if (term->default_fg_color != color_256[TERM_FG_COLOR_INDEX])
+                term->fg_color = term->default_fg_color;
+            else if (!term->bold)
                 term->fg_color = color_256[TERM_FG_COLOR_INDEX];
             else
                 term->fg_color = color_256[TERM_FG_COLOR_INDEX + 8];
@@ -424,7 +432,9 @@ static void term_out_SGR(term_state_t *term)
             return;
         case 49:
             term->bg_color_index = TERM_BG_COLOR_INDEX;
-            if (!term->blink)
+            if (term->default_bg_color != color_256[TERM_BG_COLOR_INDEX])
+                term->bg_color = term->default_bg_color;
+            else if (!term->blink)
                 term->bg_color = color_256[TERM_BG_COLOR_INDEX];
             else
                 term->bg_color = color_256[TERM_BG_COLOR_INDEX + 8];
@@ -841,6 +851,12 @@ static void term_out_state_Fe(term_state_t *term, char ch)
         term->csi_param_count = 0;
         term->csi_param[0] = 0;
     }
+    else if (ch == ']')
+    {
+        term->ansi_state = ansi_state_OSC;
+        term->csi_param_count = 0;
+        term->csi_param[0] = 0;
+    }
     else if (ch == 'N')
         term->ansi_state = ansi_state_SS2;
     else if (ch == 'O')
@@ -909,29 +925,6 @@ static void term_out_CSI(term_state_t *term, char ch)
     }
 }
 
-static void term_out_CSI_question_SGR(term_state_t *term)
-{
-    for (uint8_t idx = 0; idx < term->csi_param_count; idx++)
-    {
-        uint16_t param = term->csi_param[idx];
-        switch (param)
-        {
-        case 38:
-            sgr_color(term, idx, &term->cursor_fg_color);
-            return;
-        case 48:
-            sgr_color(term, idx, &term->cursor_bg_color);
-            return;
-        case 39:
-            term->cursor_fg_color = color_256[TERM_BG_COLOR_INDEX];
-            break;
-        case 49:
-            term->cursor_bg_color = color_256[TERM_FG_COLOR_INDEX];
-            break;
-        }
-    }
-}
-
 static void term_out_CSI_question(term_state_t *term, char ch)
 {
     switch (ch)
@@ -953,9 +946,6 @@ static void term_out_CSI_question(term_state_t *term, char ch)
             term->cursor_enabled = false;
             break;
         }
-        break;
-    case 'm':
-        term_out_CSI_question_SGR(term);
         break;
     }
 }
@@ -1020,6 +1010,157 @@ static void term_out_state_CSI(term_state_t *term, char ch)
     term->ansi_state = ansi_state_C0;
 }
 
+// Dispatched on OSC terminator (BEL or ST). Implements the dynamic-color
+// subset of xterm OSC sequences:
+//   OSC 10 ; #rrggbb   set default foreground
+//   OSC 11 ; #rrggbb   set default background
+//   OSC 12 ; #rrggbb   set cursor color
+//   OSC 110            reset default foreground
+//   OSC 111            reset default background
+//   OSC 112            reset cursor color
+// Spec format restricted to "#rrggbb"; other OSC codes/specs are silently
+// ignored for forward compatibility.
+static void term_out_OSC(term_state_t *term)
+{
+    uint8_t count = term->csi_param_count;
+    bool spec_ok = (count == 8);
+    bool empty = (count == 0);
+    uint16_t packed = 0;
+    if (spec_ok)
+        packed = SCANVIDEO_ALPHA_MASK | SCANVIDEO_PIXEL_FROM_RGB8(
+                                            term->csi_param[1],
+                                            term->csi_param[2],
+                                            term->csi_param[3]);
+    switch (term->csi_param[0])
+    {
+    case 10:
+        if (spec_ok)
+        {
+            term->default_fg_color = packed;
+            if (term->fg_color_index == TERM_FG_COLOR_INDEX)
+                term->fg_color = packed;
+        }
+        break;
+    case 11:
+        if (spec_ok)
+        {
+            term->default_bg_color = packed;
+            if (term->bg_color_index == TERM_BG_COLOR_INDEX)
+                term->bg_color = packed;
+        }
+        break;
+    case 12:
+        if (spec_ok)
+            term->cursor_bg_color = packed;
+        break;
+    case 110:
+        if (empty)
+        {
+            term->default_fg_color = color_256[TERM_FG_COLOR_INDEX];
+            if (term->fg_color_index == TERM_FG_COLOR_INDEX)
+                term->fg_color = term->bold ? color_256[TERM_FG_COLOR_INDEX + 8]
+                                            : color_256[TERM_FG_COLOR_INDEX];
+        }
+        break;
+    case 111:
+        if (empty)
+        {
+            term->default_bg_color = color_256[TERM_BG_COLOR_INDEX];
+            if (term->bg_color_index == TERM_BG_COLOR_INDEX)
+                term->bg_color = term->blink ? color_256[TERM_BG_COLOR_INDEX + 8]
+                                             : color_256[TERM_BG_COLOR_INDEX];
+        }
+        break;
+    case 112:
+        if (empty)
+            term->cursor_bg_color = color_256[TERM_FG_COLOR_INDEX];
+        break;
+    }
+}
+
+// Streaming OSC body parser; uses csi_param[] as scratch storage.
+//   csi_param[0]      = Ps (accumulated digits)
+//   csi_param[1..3]   = parsed R, G, B bytes once spec begins
+//   csi_param_count   = sub-state cursor:
+//       0           collecting Ps digits
+//       1           saw ';', expecting '#'
+//       2..7        accumulating hex digits of #rrggbb
+//       8           spec complete, awaiting terminator
+//       0xFF        malformed; drain until terminator
+static void term_out_state_OSC(term_state_t *term, char ch)
+{
+    if (ch == '\a') // BEL terminator
+    {
+        term_out_OSC(term);
+        term->ansi_state = ansi_state_C0;
+        return;
+    }
+    if (ch == '\33') // ESC, possibly start of ST (ESC \)
+    {
+        term->ansi_state = ansi_state_OSC_esc;
+        return;
+    }
+    if (term->csi_param_count == 0xFF)
+        return;
+    switch (term->csi_param_count)
+    {
+    case 0: // collecting Ps digits
+        if (ch >= '0' && ch <= '9')
+            term->csi_param[0] = term->csi_param[0] * 10 + (ch - '0');
+        else if (ch == ';')
+        {
+            term->csi_param_count = 1;
+            term->csi_param[1] = 0;
+            term->csi_param[2] = 0;
+            term->csi_param[3] = 0;
+        }
+        else
+            term->csi_param_count = 0xFF;
+        break;
+    case 1: // expect '#'
+        if (ch == '#')
+            term->csi_param_count = 2;
+        else
+            term->csi_param_count = 0xFF;
+        break;
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+    {
+        uint8_t hex;
+        if (ch >= '0' && ch <= '9')
+            hex = ch - '0';
+        else if (ch >= 'a' && ch <= 'f')
+            hex = ch - 'a' + 10;
+        else if (ch >= 'A' && ch <= 'F')
+            hex = ch - 'A' + 10;
+        else
+        {
+            term->csi_param_count = 0xFF;
+            break;
+        }
+        // States 2,3 -> R; 4,5 -> G; 6,7 -> B
+        uint8_t slot = 1 + (term->csi_param_count - 2) / 2;
+        term->csi_param[slot] = (term->csi_param[slot] << 4) | hex;
+        term->csi_param_count++;
+        break;
+    }
+    default: // spec already complete; any extra chars before terminator are bogus
+        term->csi_param_count = 0xFF;
+        break;
+    }
+}
+
+static void term_out_state_OSC_esc(term_state_t *term, char ch)
+{
+    if (ch == '\\')
+        term_out_OSC(term);
+    term->ansi_state = ansi_state_C0;
+}
+
 static void term_out_char(term_state_t *term, char ch)
 {
     if (ch == '\30')
@@ -1045,6 +1186,12 @@ static void term_out_char(term_state_t *term, char ch)
         case ansi_state_CSI_greater:
         case ansi_state_CSI_question:
             term_out_state_CSI(term, ch);
+            break;
+        case ansi_state_OSC:
+            term_out_state_OSC(term, ch);
+            break;
+        case ansi_state_OSC_esc:
+            term_out_state_OSC_esc(term, ch);
             break;
         }
 }
