@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -20,7 +20,7 @@
 void led_init(void);
 void led_task(void);
 
-// Make it blink
-void led_blink(bool on);
+// Enable blinking
+void led_blink(bool enable);
 
 #endif /* _RIA_SYS_LED_H_ */

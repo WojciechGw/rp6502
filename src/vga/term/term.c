@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -66,7 +66,7 @@ typedef struct term_state
     bool line_wrap;
     bool wrapped[TERM_MAX_HEIGHT];
     bool dirty[TERM_MAX_HEIGHT];
-    bool cleaned;
+    bool all_clean;
     uint16_t erase_fg_color[TERM_MAX_HEIGHT];
     uint16_t erase_bg_color[TERM_MAX_HEIGHT];
     uint8_t y_offset;
@@ -76,6 +76,8 @@ typedef struct term_state
     bool cursor_is_inv;
     uint16_t fg_color;
     uint16_t bg_color;
+    uint16_t cursor_fg_color;
+    uint16_t cursor_bg_color;
     uint8_t fg_color_index;
     uint8_t bg_color_index;
     term_data_t *mem;
@@ -150,7 +152,7 @@ static void term_set_cursor_position(term_state_t *term, uint16_t x, uint16_t y)
 static void term_clean_task(term_state_t *term)
 {
     // Clean only one line per task
-    if (term->cleaned)
+    if (term->all_clean)
         return;
     for (size_t i = 0; i < term->height; i++)
         if (term->dirty[i])
@@ -158,23 +160,50 @@ static void term_clean_task(term_state_t *term)
             term_clean_line(term, i);
             return;
         }
-    term->cleaned = true;
+    term->all_clean = true;
 }
 
-static void term_out_FF(term_state_t *term)
+static void term_shift_meta_up(term_state_t *term, uint8_t count)
 {
-    for (size_t i = 0; i < term->height; i++)
+    for (uint8_t i = 0; i < count; i++)
+    {
+        term->wrapped[i] = term->wrapped[i + 1];
+        term->dirty[i] = term->dirty[i + 1];
+        term->erase_fg_color[i] = term->erase_fg_color[i + 1];
+        term->erase_bg_color[i] = term->erase_bg_color[i + 1];
+    }
+}
+
+static void term_shift_meta_down(term_state_t *term, uint8_t start)
+{
+    for (int i = start; i > 0; i--)
+    {
+        term->wrapped[i] = term->wrapped[i - 1];
+        term->dirty[i] = term->dirty[i - 1];
+        term->erase_fg_color[i] = term->erase_fg_color[i - 1];
+        term->erase_bg_color[i] = term->erase_bg_color[i - 1];
+    }
+}
+
+static void term_mark_rows_erase(term_state_t *term, uint8_t from, uint8_t to)
+{
+    for (uint8_t i = from; i < to; i++)
     {
         term->wrapped[i] = false;
         term->dirty[i] = true;
         term->erase_fg_color[i] = term->fg_color;
         term->erase_bg_color[i] = term->bg_color;
     }
+    term->all_clean = false;
+}
+
+static void term_out_FF(term_state_t *term)
+{
+    term_mark_rows_erase(term, 0, term->height);
     term->x = 0;
     term->y = 0;
     term->y_offset = 0;
     term->ptr = term->mem;
-    term->cleaned = false;
     term_clean_line(term, 0);
 }
 
@@ -185,6 +214,8 @@ static void term_out_RIS(term_state_t *term)
     term->bg_color_index = TERM_BG_COLOR_INDEX;
     term->fg_color = color_256[TERM_FG_COLOR_INDEX];
     term->bg_color = color_256[TERM_BG_COLOR_INDEX];
+    term->cursor_fg_color = color_256[TERM_BG_COLOR_INDEX];
+    term->cursor_bg_color = color_256[TERM_FG_COLOR_INDEX];
     term->bold = false;
     term->blink = false;
     term->cursor_enabled = true;
@@ -222,13 +253,7 @@ static void term_state_set_height(term_state_t *term, uint8_t height)
                     term->y_offset = TERM_MAX_HEIGHT - 1;
                 else
                     term->y_offset--;
-                for (int i = term->height - 1; i > 0; i--)
-                {
-                    term->wrapped[i] = term->wrapped[i - 1];
-                    term->dirty[i] = term->dirty[i - 1];
-                    term->erase_fg_color[i] = term->erase_fg_color[i - 1];
-                    term->erase_bg_color[i] = term->erase_bg_color[i - 1];
-                }
+                term_shift_meta_down(term, term->height - 1);
                 term->wrapped[0] = false;
                 term->dirty[0] = false;
                 continue;
@@ -247,13 +272,7 @@ static void term_state_set_height(term_state_t *term, uint8_t height)
                 term->y--;
                 if (++term->y_offset >= TERM_MAX_HEIGHT)
                     term->y_offset -= TERM_MAX_HEIGHT;
-                for (size_t i = 0; i < term->height; i++)
-                {
-                    term->wrapped[i] = term->wrapped[i + 1];
-                    term->dirty[i] = term->dirty[i + 1];
-                    term->erase_fg_color[i] = term->erase_fg_color[i + 1];
-                    term->erase_bg_color[i] = term->erase_bg_color[i + 1];
-                }
+                term_shift_meta_up(term, term->height);
                 continue;
             }
             row = term->y_offset + term->height;
@@ -270,6 +289,9 @@ static void term_state_set_height(term_state_t *term, uint8_t height)
     }
 }
 
+// Self-inverse swap: while lit, cursor_fg/bg_color hold the saved cell colors;
+// while unlit, they hold the configured cursor colors. Callers must force unlit
+// before touching cell state or cursor colors (com_out_chars already does this).
 static void term_cursor_set_inv(term_state_t *term, bool inv)
 {
     if (!term->cursor_enabled && inv)
@@ -279,9 +301,12 @@ static void term_cursor_set_inv(term_state_t *term, bool inv)
     term_data_t *term_ptr = term->ptr;
     if (term->x == term->width)
         term_ptr--;
-    uint16_t swap = term_ptr->fg_color;
-    term_ptr->fg_color = term_ptr->bg_color;
-    term_ptr->bg_color = swap;
+    uint16_t tmp = term_ptr->fg_color;
+    term_ptr->fg_color = term->cursor_fg_color;
+    term->cursor_fg_color = tmp;
+    tmp = term_ptr->bg_color;
+    term_ptr->bg_color = term->cursor_bg_color;
+    term->cursor_bg_color = tmp;
     term->cursor_is_inv = inv;
 }
 
@@ -291,50 +316,42 @@ static void sgr_color(term_state_t *term, uint8_t idx, uint16_t *color)
         term->csi_param[idx + 1] == 5)
     {
         // e.g. ESC[38;5;255m - Indexed color
-        if (color)
-        {
-            uint16_t color_idx = term->csi_param[idx + 2];
-            if (color_idx < 256)
-                *color = color_256[color_idx];
-        }
+        uint16_t color_idx = term->csi_param[idx + 2];
+        if (color_idx < 256)
+            *color = color_256[color_idx];
     }
     else if (idx + 4 < term->csi_param_count &&
              term->csi_separator[idx] == ';' &&
              term->csi_param[idx + 1] == 2)
     {
-        // e.g. ESC[38;2;255;255;255m - RBG color
-        if (color)
-            *color = SCANVIDEO_ALPHA_MASK |
-                     SCANVIDEO_PIXEL_FROM_RGB8(
-                         term->csi_param[idx + 2],
-                         term->csi_param[idx + 3],
-                         term->csi_param[idx + 4]);
+        // e.g. ESC[38;2;255;255;255m - RGB color
+        *color = SCANVIDEO_ALPHA_MASK |
+                 SCANVIDEO_PIXEL_FROM_RGB8(
+                     term->csi_param[idx + 2],
+                     term->csi_param[idx + 3],
+                     term->csi_param[idx + 4]);
     }
     else if (idx + 5 < term->csi_param_count &&
              term->csi_separator[idx] == ':' &&
              term->csi_param[idx + 1] == 2)
     {
-        // e.g. ESC[38:2::255:255:255:::m - RBG color (ITU)
-        if (color)
-            *color = SCANVIDEO_ALPHA_MASK |
-                     SCANVIDEO_PIXEL_FROM_RGB8(
-                         term->csi_param[idx + 3],
-                         term->csi_param[idx + 4],
-                         term->csi_param[idx + 5]);
+        // e.g. ESC[38:2::255:255:255:::m - RGB color (ITU)
+        *color = SCANVIDEO_ALPHA_MASK |
+                 SCANVIDEO_PIXEL_FROM_RGB8(
+                     term->csi_param[idx + 3],
+                     term->csi_param[idx + 4],
+                     term->csi_param[idx + 5]);
     }
     else if (idx + 1 < term->csi_param_count &&
              term->csi_param[idx + 1] == 1)
     {
         // e.g. ESC[38;1m - transparent
-        if (color)
-            *color = *color & ~SCANVIDEO_ALPHA_MASK;
+        *color = *color & ~SCANVIDEO_ALPHA_MASK;
     }
 }
 
 static void term_out_SGR(term_state_t *term)
 {
-    if (term->csi_param_count > TERM_CSI_PARAM_MAX_LEN)
-        return;
     for (uint8_t idx = 0; idx < term->csi_param_count; idx++)
     {
         uint16_t param = term->csi_param[idx];
@@ -474,8 +491,8 @@ static void term_out_DSR(term_state_t *term)
         break;
     case 6:
     {
-        int x = term->x;
-        int y = term->y;
+        unsigned x = term->x;
+        unsigned y = term->y;
         if (x == term->width)
             x--;
         com_in_write_ansi_CPR(y + 1, x + 1);
@@ -508,7 +525,7 @@ static void term_out_LF(term_state_t *term, bool wrapping)
     term->ptr += term->width;
     term_constrain_ptr(term);
     if (wrapping)
-        term->wrapped[term->y] = wrapping;
+        term->wrapped[term->y] = true;
     else if (term->y < term->height - 1 && term->wrapped[term->y])
     {
         ++term->y;
@@ -521,19 +538,12 @@ static void term_out_LF(term_state_t *term, bool wrapping)
         for (size_t x = 0; x < term->width; x++)
         {
             line_ptr[x].font_code = ' ';
-            line_ptr[x].fg_color = color_256[TERM_FG_COLOR_INDEX];
-            line_ptr[x].bg_color = color_256[TERM_BG_COLOR_INDEX];
+            line_ptr[x].fg_color = term->fg_color;
+            line_ptr[x].bg_color = term->bg_color;
         }
         if (++term->y_offset == TERM_MAX_HEIGHT)
             term->y_offset = 0;
-        // scroll the wrapped, dirty, and erase-color arrays
-        for (uint8_t y = 0; y < term->height - 1; y++)
-        {
-            term->wrapped[y] = term->wrapped[y + 1];
-            term->dirty[y] = term->dirty[y + 1];
-            term->erase_fg_color[y] = term->erase_fg_color[y + 1];
-            term->erase_bg_color[y] = term->erase_bg_color[y + 1];
-        }
+        term_shift_meta_up(term, term->height - 1);
         term->wrapped[term->height - 1] = false;
         term->dirty[term->height - 1] = false;
     }
@@ -782,37 +792,16 @@ static void term_out_ED(term_state_t *term)
     switch (term->csi_param[0])
     {
     case 0: //  to end of screen
-        for (size_t i = term->y + 1; i < term->height; i++)
-        {
-            term->wrapped[i] = false;
-            term->dirty[i] = true;
-            term->erase_fg_color[i] = term->fg_color;
-            term->erase_bg_color[i] = term->bg_color;
-        }
-        term->cleaned = false;
+        term_mark_rows_erase(term, term->y + 1, term->height);
         term_out_EL(term);
         break;
     case 1: //  to beginning of the screen
-        for (size_t i = 0; i < term->y; i++)
-        {
-            term->wrapped[i] = false;
-            term->dirty[i] = true;
-            term->erase_fg_color[i] = term->fg_color;
-            term->erase_bg_color[i] = term->bg_color;
-        }
-        term->cleaned = false;
+        term_mark_rows_erase(term, 0, term->y);
         term_out_EL(term);
         break;
     case 2: // full screen
     case 3: // xterm
-        for (size_t i = 0; i < term->height; i++)
-        {
-            term->wrapped[i] = false;
-            term->dirty[i] = true;
-            term->erase_fg_color[i] = term->fg_color;
-            term->erase_bg_color[i] = term->bg_color;
-        }
-        term->cleaned = false;
+        term_mark_rows_erase(term, 0, term->height);
         term_clean_line(term, term->y);
         break;
     }
@@ -920,6 +909,29 @@ static void term_out_CSI(term_state_t *term, char ch)
     }
 }
 
+static void term_out_CSI_question_SGR(term_state_t *term)
+{
+    for (uint8_t idx = 0; idx < term->csi_param_count; idx++)
+    {
+        uint16_t param = term->csi_param[idx];
+        switch (param)
+        {
+        case 38:
+            sgr_color(term, idx, &term->cursor_fg_color);
+            return;
+        case 48:
+            sgr_color(term, idx, &term->cursor_bg_color);
+            return;
+        case 39:
+            term->cursor_fg_color = color_256[TERM_BG_COLOR_INDEX];
+            break;
+        case 49:
+            term->cursor_bg_color = color_256[TERM_FG_COLOR_INDEX];
+            break;
+        }
+    }
+}
+
 static void term_out_CSI_question(term_state_t *term, char ch)
 {
     switch (ch)
@@ -942,12 +954,15 @@ static void term_out_CSI_question(term_state_t *term, char ch)
             break;
         }
         break;
+    case 'm':
+        term_out_CSI_question_SGR(term);
+        break;
     }
 }
 
 static void term_out_state_CSI(term_state_t *term, char ch)
 {
-    // Silently discard overflow parameters but still count to + 1.
+    // Drop digits past max, but keep counting params so the terminator still dispatches.
     if (ch >= '0' && ch <= '9')
     {
         if (term->csi_param_count < TERM_CSI_PARAM_MAX_LEN)
@@ -994,6 +1009,7 @@ static void term_out_state_CSI(term_state_t *term, char ch)
     case ansi_state_CSI_less:
     case ansi_state_CSI_equal:
     case ansi_state_CSI_greater:
+        // Private CSI parameter bytes; recognize the sequence so digits don't misparse, then discard.
         break;
     case ansi_state_CSI_question:
         term_out_CSI_question(term, ch);

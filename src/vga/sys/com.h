@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -20,12 +20,12 @@
 #define COM_UART_INTERFACE uart1
 #define COM_UART_BAUDRATE 115200
 
-// IN Buffering is also 32 byte UART FIFO.
+// IN buffering adds to the 32-byte UART FIFO.
 // This doesn't need to be large.
 #define COM_IN_BUF_SIZE 16
-// OUT Buffer is a multiple of USB BULK_PACKET_SIZE.
-// 1x will cause data loss on forwarded usb ports.
-#define COM_OUT_BUF_SIZE (2 * 64)
+// OUT buffer is generous to prevent data loss on
+// forwarded USB ports (usbipd). 32=bad 64=ok 128=safe
+#define COM_OUT_BUF_SIZE 128
 
 /* Main events
  */
@@ -44,7 +44,7 @@ size_t com_in_free(void);
 bool com_in_empty(void);
 void com_in_write(char ch);
 void com_suppress_term_reply(bool suppress);
-void com_in_write_ansi_CPR(int row, int col);
+void com_in_write_ansi_CPR(unsigned row, unsigned col);
 void com_in_write_ansi_DA(void);
 void com_in_write_ansi_DSR_ok(void);
 
@@ -53,6 +53,7 @@ void com_in_write_ansi_DSR_ok(void);
 // OUT is sunk to term
 // OUT is sunk by USB CDC
 bool com_out_empty(void);
+bool com_out_full(void);
 char com_out_peek(void);
 char com_out_read(void);
 

@@ -23,17 +23,12 @@
  *
  */
 
-#ifndef _TUSB_CONFIG_H_
-#define _TUSB_CONFIG_H_
+#ifndef TUSB_CONFIG_H_
+#define TUSB_CONFIG_H_
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-
-    //--------------------------------------------------------------------
-    // COMMON CONFIGURATION
-    //--------------------------------------------------------------------
+//--------------------------------------------------------------------
+// COMMON CONFIGURATION
+//--------------------------------------------------------------------
 
 // defined by compiler flags for flexibility
 #ifndef CFG_TUSB_MCU
@@ -54,9 +49,9 @@ extern "C"
 #define CFG_TUSB_MEM_ALIGN __attribute__((aligned(4)))
 #endif
 
-    //--------------------------------------------------------------------
-    // DEVICE CONFIGURATION
-    //--------------------------------------------------------------------
+//--------------------------------------------------------------------
+// DEVICE CONFIGURATION
+//--------------------------------------------------------------------
 
 #ifndef CFG_TUD_ENDPOINT0_SIZE
 #define CFG_TUD_ENDPOINT0_SIZE 64
@@ -72,12 +67,12 @@ extern "C"
 #define CFG_TUD_CDC_RX_BUFSIZE 64
 #define CFG_TUD_CDC_TX_BUFSIZE 64
 
+#ifndef TUD_OPT_RP2040_USB_DEVICE_ENUMERATION_FIX
+#define TUD_OPT_RP2040_USB_DEVICE_ENUMERATION_FIX 1
+#endif
+
 #ifndef TUD_OPT_RP2040_USB_DEVICE_UFRAME_FIX
 #define TUD_OPT_RP2040_USB_DEVICE_UFRAME_FIX 1
 #endif
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* _TUSB_CONFIG_H_ */
+#endif /* TUSB_CONFIG_H_ */

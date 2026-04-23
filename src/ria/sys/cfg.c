@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -12,9 +12,9 @@
 #include "net/ble.h"
 #include "net/cyw.h"
 #include "net/wfi.h"
-#include "net/tel.h"
 #include "str/str.h"
 #include "sys/cfg.h"
+#include "sys/com.h"
 #include "sys/cpu.h"
 #include "sys/lfs.h"
 #include "sys/mem.h"
@@ -63,10 +63,14 @@ static void cfg_save_with_boot_opt(const char *opt_str)
     if (!opt_str)
     {
         opt_str = (char *)mbuf;
-        // Fetch the boot string, ignore the rest
+        mbuf[0] = 0;
+        // Preserve the existing boot line across rewrite
         while (lfs_gets((char *)mbuf, MBUF_SIZE, &lfs_volume, &lfs_file))
+        {
             if (mbuf[0] != '+')
                 break;
+            mbuf[0] = 0;
+        }
         lfsresult = lfs_file_rewind(&lfs_volume, &lfs_file);
         mon_add_response_lfs(lfsresult);
     }
@@ -107,8 +111,8 @@ static void cfg_save_with_boot_opt(const char *opt_str)
                                wfi_get_ssid(),
                                wfi_get_pass(),
                                ble_get_enabled(),
-                               tel_get_port(),
-                               tel_get_key(),
+                               com_tel_get_port(),
+                               com_tel_get_key(),
 #endif /* RP6502_RIA_W */
                                opt_str);
     }
@@ -185,10 +189,10 @@ static void cfg_load_with_boot_opt(bool boot_only)
             ble_load_enabled(str);
             break;
         case 'O':
-            tel_load_port(str);
+            com_tel_load_port(str);
             break;
         case 'A':
-            tel_load_key(str);
+            com_tel_load_key(str);
             break;
 #endif /* RP6502_RIA_W */
         default:

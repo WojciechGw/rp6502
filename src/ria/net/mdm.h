@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -58,7 +58,7 @@ std_rw_result mdm_std_write(int desc, const char *buf, uint32_t count, uint32_t 
 extern mdm_settings_t *mdm_settings;
 void mdm_set_conn(int desc);
 bool mdm_settings_persistent(void);
-int mdm_response_code(char *buf, size_t buf_size, int state);
+int mdm_response_code(char *buf, size_t buf_size, int code);
 void mdm_set_response_fn(int (*fn)(char *, size_t, int), int state);
 void mdm_factory_settings(mdm_settings_t *settings);
 bool mdm_write_settings(const mdm_settings_t *settings);
@@ -72,7 +72,7 @@ void mdm_carrier_lost(void);
 void mdm_ring(void);
 bool mdm_answer(void);
 uint8_t mdm_get_ring_count(void);
-void mdm_listen_update(void);
+bool mdm_set_listen_port(uint16_t port);
 bool mdm_conns_is_open(int desc);
 uint16_t mdm_conns_listen_port(int desc);
 

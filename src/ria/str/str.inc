@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -42,9 +42,9 @@ X(STR_STATUS_USB, "USB : %d %s, %d %s, %d %s, %d %s, %d %s, %d %s\n")
 X(STR_STATUS_MSC, "%s: %s %.8s %.16s rev %.4s\n")
 X(STR_STATUS_CDC, "%s: %s %s\n")
 
-// ANSI to reset the terminal at boot
+// ANSI to reset the terminal at boot. Extra \33[2J for minicom.
 X(STR_SYS_TERM_RESET, "\30\33[0m\33[?25h\n");
-X(STR_SYS_FULL_TERM_RESET, "\30\33c\n");
+X(STR_SYS_FULL_TERM_RESET, "\30\33c\33[2J\n");
 
 // Monitor prompts
 X(STR_MON_PROMPT_NEWLINE, "\30\33[0m\33[?25h\n]")
@@ -141,7 +141,7 @@ X(STR_MDM_RESPONSE_8, "NO ANSWER")
 
 // The only bit of help we don't localize.
 X(STR_HELP_ABOUT,
-  "Picocomputer 6502 - Copyright (c) 2025 Rumbledethumps.\n"
+  "Picocomputer 6502 - Copyright (c) 2026 Rumbledethumps.\n"
   "     Pi Pico SDKs - Copyright (c) 2020 Raspberry Pi (Trading) Ltd.\n"
   "      Tiny printf - Copyright (c) 2014-2019 Marco Paland, PALANDesign.\n"
   "          TinyUSB - Copyright (c) 2018 hathach (tinyusb.org)\n"

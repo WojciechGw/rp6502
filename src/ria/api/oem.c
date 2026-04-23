@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -10,7 +10,7 @@
 #include "mon/mon.h"
 #include "str/str.h"
 #include "sys/cfg.h"
-#include "sys/pix.h"
+#include "sys/vga.h"
 #include <fatfs/ff.h>
 
 #if defined(DEBUG_RIA_API) || defined(DEBUG_RIA_API_OEM)
@@ -22,7 +22,7 @@ static inline void DBG(const char *fmt, ...) { (void)fmt; }
 
 // Only the code page specified by RP6502_CODE_PAGE is installed to flash.
 // To include all code pages, set RP6502_CODE_PAGE to 0 (CMakeLists.txt).
-// This is the default for when RP6502_CODE_PAGE == 0.
+// When RP6502_CODE_PAGE == 0, this is the default code page.
 #define OEM_DEFAULT_CODE_PAGE 437
 
 static uint16_t oem_code_page_set;
@@ -46,7 +46,7 @@ static void oem_request_code_page(uint16_t cp)
 #endif
     if (old_code_page != oem_code_page_run)
     {
-        pix_send_blocking(PIX_DEVICE_VGA, 0xFu, 0x01u, oem_code_page_run);
+        vga_set_code_page(oem_code_page_run);
         kbd_rebuild_code_page_cache();
     }
 }

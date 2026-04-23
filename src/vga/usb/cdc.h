@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -16,7 +16,7 @@
 
 void cdc_task(void);
 
-// True when a host terminal is open and actively communicating
-bool cdc_is_open(void);
+// True when a host terminal is ready and actively communicating
+bool cdc_is_ready(void);
 
 #endif /* _VGA_USB_CDC_H_ */

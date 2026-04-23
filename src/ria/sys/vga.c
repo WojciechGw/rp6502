@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -29,8 +29,10 @@ static inline void DBG(const char *fmt, ...) { (void)fmt; }
 #define VGA_BACKCHANNEL_ACK_MS 2
 // How long to wait before aborting version string
 #define VGA_VERSION_WATCHDOG_MS 2
-// Abandon backchannel after two missed vsync messages (~2/60sec)
-#define VGA_VSYNC_WATCHDOG_MS 35
+// Abandon backchannel after two missed vsync messages
+// with 10ms added for UART drain and safety margin
+// when changing canvas or timing.
+#define VGA_VSYNC_WATCHDOG_MS 44
 
 static enum {
     VGA_NOT_FOUND,       // Possibly normal, RP6502-VGA is optional
@@ -54,6 +56,16 @@ static size_t vga_version_message_length;
 static inline void vga_pix_backchannel_disable(void)
 {
     pix_send_blocking(PIX_DEVICE_VGA, 0xF, 0x04, 0);
+}
+
+void vga_set_tel_console_active(bool active)
+{
+    pix_send_blocking(PIX_DEVICE_VGA, 0xF, 0x02, active ? 1 : 0);
+}
+
+void vga_set_code_page(uint16_t cp)
+{
+    pix_send_blocking(PIX_DEVICE_VGA, 0xF, 0x01, cp);
 }
 
 static inline void vga_pix_backchannel_enable(void)
@@ -80,17 +92,19 @@ static inline void vga_backchannel_irq_disable(void)
 
 static inline void vga_backchannel_command(uint8_t byte)
 {
-    uint8_t scalar = byte & 0xF;
     switch (byte & 0xF0)
     {
     case 0x80:
+    {
+        uint8_t frame = byte & 0xF;
         vga_vsync_deadline = time_us_32() + VGA_VSYNC_WATCHDOG_MS * 1000;
-        if (scalar < (vga_vsync_frame & 0xF))
-            vga_vsync_frame = (vga_vsync_frame & 0xF0) + 0x10;
-        vga_vsync_frame = (vga_vsync_frame & 0xF0) | scalar;
+        if (frame < (vga_vsync_frame & 0xF))
+            vga_vsync_frame += 0x10;
+        vga_vsync_frame = (vga_vsync_frame & 0xF0) | frame;
         REGS(0xFFE3) = vga_vsync_frame;
         ria_trigger_irq();
         break;
+    }
     case 0x90:
         pix_ack();
         break;
@@ -125,9 +139,6 @@ static void vga_rln_callback(bool timeout)
 static void vga_connect(void)
 {
     vga_backchannel_irq_disable();
-
-    // Drop cold boot noise reported in field. Ned says works down to 4 ms.
-    busy_wait_ms(20);
     while (stdio_getchar_timeout_us(0) != PICO_ERROR_TIMEOUT)
         tight_loop_contents();
 
@@ -138,10 +149,16 @@ static void vga_connect(void)
     while (vga_state == VGA_TESTING)
         mem_task();
     if (vga_state == VGA_NOT_FOUND)
-        return vga_pix_backchannel_disable();
+    {
+        vga_pix_backchannel_disable();
+        return;
+    }
 
     // Turn on the backchannel
     pio_gpio_init(VGA_BACKCHANNEL_PIO, VGA_BACKCHANNEL_PIN);
+    // Drain bytes the PIO sampled off the pin while it was driven by UART TX
+    while (!pio_sm_is_rx_fifo_empty(VGA_BACKCHANNEL_PIO, VGA_BACKCHANNEL_SM))
+        (void)pio_sm_get(VGA_BACKCHANNEL_PIO, VGA_BACKCHANNEL_SM);
     vga_pix_backchannel_enable();
 
     // Wait for version
@@ -190,6 +207,7 @@ void vga_init(void)
 {
     // Disable backchannel for the case where RIA reboots and VGA doesn't
     vga_pix_backchannel_disable();
+    vga_set_tel_console_active(false);
 
     // Program a UART Rx in PIO
     pio_sm_set_consecutive_pindirs(VGA_BACKCHANNEL_PIO, VGA_BACKCHANNEL_SM,
@@ -210,7 +228,7 @@ void vga_init(void)
     irq_set_priority(PIO1_IRQ_0, PICO_DEFAULT_IRQ_PRIORITY - 0x10);
     irq_set_enabled(PIO1_IRQ_0, true);
 
-    // Disable backchannel again, for safety.
+    // Re-send in case the first disable was lost
     vga_pix_backchannel_disable();
 
     // Connect and establish backchannel
@@ -276,8 +294,8 @@ int vga_status_response(char *buf, size_t buf_size, int state)
     const char *msg = STR_VGA_SEARCHING;
     switch (vga_state)
     {
-    case VGA_FOUND:
     case VGA_TESTING:
+    case VGA_FOUND:
         break;
     case VGA_CONNECTED:
         msg = vga_version_message;

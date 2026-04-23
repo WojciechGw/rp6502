@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 Rumbledethumps
+ * Copyright (c) 2026 Rumbledethumps
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -38,8 +38,8 @@ void cpu_run(void);
 void cpu_stop(void);
 void cpu_reclock(void);
 
-// The CPU is active when RESB is high or when
-// we're waiting for the RESB timer.
+// True between cpu_run() and cpu_stop();
+// the 6502 is running or about to run once RESB rises.
 bool cpu_active(void);
 
 // Return calculated reset time. May be higher than configured
