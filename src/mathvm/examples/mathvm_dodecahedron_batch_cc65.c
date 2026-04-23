@@ -35,16 +35,21 @@
 #define CY  180
 
 #define XRAM_VERT_IN   0xE100u
+#define XRAM_VERT_OUT  (XRAM_VERT_IN + ((uint16_t)DODECA_VERTS * 12u))
 
 #define DODECA_VERTS 20
 #define DODECA_EDGES 30
 #define DODECA_FACES 12
 #define DODECA_FRAMES 360
+#define DODECA_SPIN_Y_STEP_DEG 1
+#define DODECA_SPIN_X_STEP_DEG 2
 #define TIMING_REPORT_FRAMES 60u
-#define PRECOMP_BAR_X  120
-#define PRECOMP_BAR_Y  172
-#define PRECOMP_BAR_W  400
-#define PRECOMP_BAR_H  16
+#define CANVAS_W 640u
+#define CANVAS_H 360u
+#define PRECOMP_BAR_W  200
+#define PRECOMP_BAR_H  8
+#define PRECOMP_BAR_X  ((CANVAS_W - PRECOMP_BAR_W) / 2u)
+#define PRECOMP_BAR_Y  ((CANVAS_H - PRECOMP_BAR_H) / 2u)
 
 #define CLEAR_MODE_FULL           0
 #define CLEAR_MODE_DIRTY_SPANS    1
@@ -241,6 +246,93 @@ static bool face_is_front(uint8_t face_index)
     return area2 < 0;
 }
 
+static int16_t mul_q8_8(int16_t a, int16_t b)
+{
+    int32_t product = (int32_t)a * (int32_t)b;
+
+    if (product >= 0)
+        return (int16_t)((product + 128) >> 8);
+
+    product = -product;
+    return (int16_t)(-((product + 128) >> 8));
+}
+
+static int16_t sin_deg_q8_8(int angle_deg)
+{
+    static const uint16_t sin_tab[91] = {
+          0,   4,   9,  13,  18,  22,  27,  31,  36,  40,
+         44,  49,  53,  58,  62,  66,  71,  75,  79,  83,
+         88,  92,  96, 100, 104, 108, 112, 116, 120, 124,
+        128, 132, 136, 139, 143, 147, 150, 154, 158, 161,
+        165, 168, 171, 175, 178, 181, 184, 187, 190, 193,
+        196, 199, 202, 204, 207, 210, 212, 215, 217, 219,
+        222, 224, 226, 228, 230, 232, 234, 236, 237, 239,
+        241, 242, 243, 245, 246, 247, 248, 249, 250, 251,
+        252, 253, 254, 254, 255, 255, 255, 256, 256, 256,
+        256
+    };
+
+    while (angle_deg < 0)
+        angle_deg += 360;
+    while (angle_deg >= 360)
+        angle_deg -= 360;
+
+    if (angle_deg <= 90)
+        return (int16_t)sin_tab[angle_deg];
+    if (angle_deg <= 180)
+        return (int16_t)sin_tab[180 - angle_deg];
+    if (angle_deg <= 270)
+        return (int16_t)(-(int16_t)sin_tab[angle_deg - 180]);
+    return (int16_t)(-(int16_t)sin_tab[360 - angle_deg]);
+}
+
+static int16_t cos_deg_q8_8(int angle_deg)
+{
+    return sin_deg_q8_8(angle_deg + 90);
+}
+
+static mx_client_result_t project_frame_yxrot30_q8_8(int angle_y_deg,
+                                                     int angle_x_deg,
+                                                     mx_point2i_t *points,
+                                                     uint16_t count)
+{
+    int16_t mat3_q8_8[9];
+    int16_t sin_y = sin_deg_q8_8(angle_y_deg);
+    int16_t cos_y = cos_deg_q8_8(angle_y_deg);
+    int16_t sin_x = sin_deg_q8_8(angle_x_deg);
+    int16_t cos_x = cos_deg_q8_8(angle_x_deg);
+    const int16_t sin30 = 128;
+    const int16_t cos30 = 222;
+    mx_client_result_t result;
+
+    mat3_q8_8[0] = cos_y;
+    mat3_q8_8[1] = mul_q8_8(sin_y, sin_x);
+    mat3_q8_8[2] = mul_q8_8(sin_y, cos_x);
+    mat3_q8_8[3] = mul_q8_8(sin30, sin_y);
+    mat3_q8_8[4] = (int16_t)(mul_q8_8(cos30, cos_x)
+                  - mul_q8_8(sin30, mul_q8_8(cos_y, sin_x)));
+    mat3_q8_8[5] = (int16_t)(-mul_q8_8(cos30, sin_x)
+                  - mul_q8_8(sin30, mul_q8_8(cos_y, cos_x)));
+    mat3_q8_8[6] = (int16_t)-mul_q8_8(cos30, sin_y);
+    mat3_q8_8[7] = (int16_t)(mul_q8_8(sin30, cos_x)
+                  + mul_q8_8(cos30, mul_q8_8(cos_y, sin_x)));
+    mat3_q8_8[8] = (int16_t)(-mul_q8_8(sin30, sin_x)
+                  + mul_q8_8(cos30, mul_q8_8(cos_y, cos_x)));
+
+    result = mx_client_m3v3p2x_q8_8(mat3_q8_8,
+                                    200,
+                                    320,
+                                    180,
+                                    XRAM_VERT_IN,
+                                    XRAM_VERT_OUT,
+                                    count);
+    if (result.status != MX_OK)
+        return result;
+
+    mx_client_xram_read_point2i_array(XRAM_VERT_OUT, points, count);
+    return result;
+}
+
 static void report_projection_time_sample(clock_t elapsed)
 {
     unsigned long avg_ticks;
@@ -257,7 +349,7 @@ static void report_projection_time_sample(clock_t elapsed)
     sec_frac = ((avg_ticks % (unsigned long)CLOCKS_PER_SEC) * 1000000UL)
              / (unsigned long)CLOCKS_PER_SEC;
 
-    printf("mx_client_project_vec3i_batch_yrot30 avg: %lu.%06lu s\n",
+    printf("projection precompute avg: %lu.%06lu s\n",
            sec_whole,
            sec_frac);
 
@@ -516,20 +608,19 @@ static bool precompute_frames(void)
     int angle;
 
     precompute_progress_begin();
+    mx_client_xram_write_vec3i_array(XRAM_VERT_IN, verts, DODECA_VERTS);
     for (angle = 0; angle < DODECA_FRAMES; ++angle)
     {
         mx_client_result_t call;
         clock_t t0;
+        int angle_y = angle * DODECA_SPIN_Y_STEP_DEG;
+        int angle_x = (angle * DODECA_SPIN_X_STEP_DEG) % DODECA_FRAMES;
 
         t0 = clock();
-        call = mx_client_project_vec3i_batch_yrot30(angle,
-                                                    200,
-                                                    320,
-                                                    180,
-                                                    XRAM_VERT_IN,
-                                                    verts,
-                                                    precomputed_frames[angle],
-                                                    DODECA_VERTS);
+        call = project_frame_yxrot30_q8_8(angle_y,
+                                          angle_x,
+                                          precomputed_frames[angle],
+                                          DODECA_VERTS);
         precompute_progress_update((uint16_t)(angle + 1));
         report_projection_time_sample(clock() - t0);
         if (call.status != MX_OK || call.out_words != 0u)
@@ -584,14 +675,14 @@ void main(void)
 #else
     puts("Clear mode: full clear");
 #endif
-    puts("Precomputing 360 projected frames at 1 degree steps.");
+    puts("Precomputing 360 projected frames with Y+X spin.");
     puts("Projection avg is reported during precompute.");
     if (!precompute_frames())
     {
         xreg_ria_keyboard(0xFFFF);
         exit(1);
     }
-    puts("Animation uses precomputed vertex frames.");
+    puts("Animation uses precomputed X+Y spin frames.");
 
     back_buf = FB_B;
 

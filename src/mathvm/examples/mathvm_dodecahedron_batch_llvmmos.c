@@ -45,6 +45,8 @@
 #define DODECA_EDGES 30
 #define DODECA_FACES 12
 #define DODECA_FRAMES 360
+#define DODECA_SPIN_Y_STEP_DEG 1
+#define DODECA_SPIN_X_STEP_DEG 2
 #define TIMING_REPORT_FRAMES 60u
 #define PRECOMP_BAR_X  120
 #define PRECOMP_BAR_Y  172
@@ -262,7 +264,7 @@ static void report_projection_time_sample(clock_t elapsed)
     sec_frac = ((avg_ticks % (unsigned long)CLOCKS_PER_SEC) * 1000000UL)
              / (unsigned long)CLOCKS_PER_SEC;
 
-    printf("mx_client_project_vec3f_batch_f32 avg: %lu.%06lu s\n",
+    printf("projection precompute avg: %lu.%06lu s\n",
            sec_whole,
            sec_frac);
 
@@ -523,15 +525,20 @@ static bool precompute_frames(void)
     precompute_progress_begin();
     for (angle = 0; angle < DODECA_FRAMES; ++angle)
     {
-        const float radians = (float)angle * (3.14159265358979323846f / 180.0f);
-        const float sin_a = sinf(radians);
-        const float cos_a = cosf(radians);
+        const int angle_y_deg = angle * DODECA_SPIN_Y_STEP_DEG;
+        const int angle_x_deg = (angle * DODECA_SPIN_X_STEP_DEG) % DODECA_FRAMES;
+        const float radians_y = (float)angle_y_deg * (3.14159265358979323846f / 180.0f);
+        const float radians_x = (float)angle_x_deg * (3.14159265358979323846f / 180.0f);
+        const float sin_y = sinf(radians_y);
+        const float cos_y = cosf(radians_y);
+        const float sin_x = sinf(radians_x);
+        const float cos_x = cosf(radians_x);
         const float sin30 = 0.5f;
         const float cos30 = 0.86602540378443864676f;
         const float mat3[9] = {
-             cos_a,            0.0f,           sin_a,
-             sin_a * sin30,    cos30,         -cos_a * sin30,
-            -sin_a * cos30,    sin30,          cos_a * cos30
+             cos_y,                         sin_y * sin_x,                         sin_y * cos_x,
+             sin30 * sin_y,                cos30 * cos_x - sin30 * cos_y * sin_x, -cos30 * sin_x - sin30 * cos_y * cos_x,
+            -cos30 * sin_y,                sin30 * cos_x + cos30 * cos_y * sin_x, -sin30 * sin_x + cos30 * cos_y * cos_x
         };
         mx_client_result_t call;
         clock_t t0;
@@ -599,14 +606,14 @@ void main(void)
 #else
     puts("Clear mode: full clear");
 #endif
-    puts("Precomputing 360 projected frames at 1 degree steps.");
+    puts("Precomputing 360 projected frames with Y+X spin.");
     puts("Projection avg is reported during precompute.");
     if (!precompute_frames())
     {
         xreg_ria_keyboard(0xFFFF);
         exit(1);
     }
-    puts("Animation uses precomputed vertex frames.");
+    puts("Animation uses precomputed X+Y spin frames.");
 
     back_buf = FB_B;
 
