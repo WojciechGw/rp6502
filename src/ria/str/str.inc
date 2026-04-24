@@ -10,6 +10,9 @@
 #if !defined(X)
 #define X(name, value) extern const char name[];
 #endif
+#if !defined(XR)
+#define XR(name, value) X(name, value)
+#endif
 
 // Configuration files on littlefs
 X(STR_CFG_FILENAME, "CONFIG.SYS")
@@ -19,6 +22,10 @@ X(STR_MDM_SETTINGS, "MODEM%d.SYS")
 
 // https://www.ntppool.org/
 X(STR_NTP_SERVER, "pool.ntp.org")
+
+// UF2 program name identifiers
+X(STR_UF2_PROG_NAME_RIA, PICO_PROGRAM_NAME)
+X(STR_UF2_PROG_NAME_VGA, "RP6502-VGA")
 
 // VGA driver
 X(STR_VGA_DISPLAY_TYPE_0, "640x480")
@@ -69,6 +76,7 @@ X(STR_INSTALL, "INSTALL")
 X(STR_REMOVE, "REMOVE")
 X(STR_REBOOT, "REBOOT")
 X(STR_RESET, "RESET")
+X(STR_FLASH, "FLASH")
 X(STR_UPLOAD, "UPLOAD")
 X(STR_UNLINK, "UNLINK")
 X(STR_BINARY, "BINARY")

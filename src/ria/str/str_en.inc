@@ -9,6 +9,9 @@
 #if !defined(X)
 #define X(name, value) extern const char name[];
 #endif
+#if !defined(XR)
+#define XR(name, value) X(name, value)
+#endif
 
 // Time format
 X(STR_STRFTIME, "%c %z %Z")
@@ -38,6 +41,8 @@ X(STR_ERR_ROM_ARGV_OVERFLOW, "?ROM argv overflow\n")
 X(STR_ERR_ROM_ARGV_INVALID, "?ROM argument invalid\n")
 X(STR_ERR_ROM_NAME_INVALID, "?ROM name invalid\n")
 X(STR_ERR_ROM_DATA_INVALID, "?ROM data invalid\n")
+X(STR_ERR_INVALID_UF2_FILE, "?Invalid UF2 file\n")
+X(STR_ERR_VGA_NOT_CONNECTED, "?VGA not connected\n")
 
 // Littlefs errors
 X(STR_ERR_LFS_IO, "?IO error\n")                     // -5
@@ -129,6 +134,10 @@ X(STR_ROM_INSTALLED_NONE, "No installed ROMs.\n")
 X(STR_ROM_INSTALLED_SINGULAR, "%d installed ROM:\n")
 X(STR_ROM_INSTALLED_PLURAL, "%d installed ROMs:\n")
 
+// UF2 progress messages, some must remain in RAM
+XR(STR_UF2_FLASHING, "\rFlashing: %d%%")
+XR(STR_UF2_FLASH_FAILED, "\n?Flashing UF2 failed, recover via BOOTSEL\n")
+
 X(STR_HELP_HELP,
   "Commands:\n"
   "HELP (command|rom)  - This help or expanded help for command or rom.\n"
@@ -145,6 +154,7 @@ X(STR_HELP_HELP,
   "REMOVE rom          - Remove ROM from RIA.\n"
   "REBOOT              - Reboot the RIA. Will load selected boot ROM.\n"
   "RESET               - Start 6502 at current reset vector ($FFFC).\n"
+  "FLASH file          - Flash UF2 file to update RIA or VGA firmware.\n"
   "MKDIR dir           - Make a new directory.\n"
   "UNLINK file|dir     - Delete a file or empty directory.\n"
   "UPLOAD file         - Write file. Binary chunks follow.\n"
@@ -235,6 +245,11 @@ X(STR_HELP_REBOOT,
 X(STR_HELP_RESET,
   "RESET will start the 6502 by bringing RESB high. This monitor will be\n"
   "suspended until the 6502 stops with a UART break, CTRL-ALT-DEL, or exit().\n")
+
+X(STR_HELP_FLASH,
+  "FLASH reads a UF2 file from a USB drive and flashes it to the RIA or VGA.\n"
+  "If flashing fails, recover via USB using the standard BOOTSEL method (hold\n"
+  "BOOTSEL while connecting USB to a computer then copy file).\n")
 
 X(STR_HELP_UPLOAD,
   "UPLOAD is used to send a file from another system to the local filesystem.\n"
