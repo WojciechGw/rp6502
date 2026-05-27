@@ -61,6 +61,9 @@ __in_flash("hlp_commands") static struct
     {STR_COPY, STR_HELP_COPY, NULL},
     {STR_MOVE, STR_HELP_MOVE, NULL},
     {STR_BINARY, STR_HELP_BINARY, NULL},
+    #ifdef RP6502_RIA_W
+    {STR_SCANWIFI, STR_HELP_SCANWIFI, NULL},
+    #endif
 };
 static const size_t HLP_COMMANDS_COUNT = sizeof HLP_COMMANDS / sizeof *HLP_COMMANDS;
 

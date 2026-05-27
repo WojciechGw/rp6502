@@ -13,6 +13,7 @@
 #include "mon/set.h"
 #include "mon/uf2.h"
 #include "net/cyw.h"
+#include "net/wfi.h"
 #include "str/rln.h"
 #include "str/str.h"
 #include "sys/com.h"
@@ -103,6 +104,9 @@ __in_flash("mon_commands") static struct
     {STR_MOVE, fil_mon_move},
     {STR_MV, fil_mon_move},
     {STR_BINARY, ram_mon_binary},
+    #ifdef RP6502_RIA_W
+    {STR_SCANWIFI, wfi_mon_scanwifi},
+    #endif
 };
 static const size_t MON_COMMANDS_COUNT = sizeof MON_COMMANDS / sizeof *MON_COMMANDS;
 

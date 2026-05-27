@@ -163,6 +163,9 @@ X(STR_HELP_HELP,
   "MOVE src dst        - \aMove or rename a file or directory.\n"
   "UPLOAD file         - \aWrite file. Binary chunks follow.\n"
   "BINARY addr len crc - \aWrite memory. Binary data follows.\n"
+  #ifdef RP6502_RIA_W
+  "SCANWIFI            - \aScan for WiFi networks in range.\n"
+  #endif
   "0000 (00 00 ...)    - \aRead or write memory.\n")
 
 X(STR_HELP_SET,
@@ -293,6 +296,13 @@ X(STR_HELP_BINARY,
 
 X(STR_HELP_STATUS,
   "STATUS will show the status of all hardware in and connected to the RIA.\n")
+
+#ifdef RP6502_RIA_W
+X(STR_HELP_SCANWIFI,
+  "SCANWIFI scans for WiFi access points in range and lists BSSID, RSSI, "
+  "channel, security family, and SSID. The scan may briefly enable the "
+  "WiFi station interface if it is not already active.\n")
+#endif
 
 X(STR_HELP_SET_PHI2,
   "PHI2 is the 6502 clock speed in kHz. The valid range is " STR_PHI2_MIN_MAX " but not all "
