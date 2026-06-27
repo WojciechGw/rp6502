@@ -22,7 +22,7 @@
 #define PCM_LOG2      12            /* 4096-byte ring, ~23 ms at 44100 Hz */
 #define PCM_BUF_SIZE  (1u << PCM_LOG2)
 #define PCM_BUF_MASK  (PCM_BUF_SIZE - 1u)
-#define PCM_RING_BASE (PCM_BASE + 4u)
+#define PCM_RING_BASE (PCM_BASE + 8u)
 
 /* Bytes consumed per 60 Hz VSYNC: 44100 * 4 / 60 = 2940 */
 #define BYTES_PER_VSYNC 2940u
@@ -135,13 +135,17 @@ int main(void)
     data_size = read_le32(hdr + 40);
     printf("Playing %lu bytes...\n", data_size);
 
-    /* --- Init XRAM control header ---------------------------------------- */
+    /* --- Init XRAM control header (8 bytes) ------------------------------ */
     RIA.addr0 = PCM_BASE;
     RIA.step0 = 1;
-    RIA.rw0 = 0;        /* write_ptr lo  */
-    RIA.rw0 = 0;        /* write_ptr hi  */
-    RIA.rw0 = 1;        /* flags: play   */
-    RIA.rw0 = PCM_LOG2; /* buf_size_log2 */
+    RIA.rw0 = 0;           /* write_ptr lo        */
+    RIA.rw0 = 0;           /* write_ptr hi        */
+    RIA.rw0 = 0;           /* format: signed 16-bit stereo */
+    RIA.rw0 = PCM_LOG2;    /* buf_size_log2       */
+    RIA.rw0 = 0x44;        /* sample_rate lo (44100 = 0xAC44) */
+    RIA.rw0 = 0xAC;        /* sample_rate hi      */
+    RIA.rw0 = 0;           /* reserved            */
+    RIA.rw0 = 0;           /* reserved            */
 
     wav_wp = 0;
     remaining = data_size;
