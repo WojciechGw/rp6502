@@ -26,6 +26,9 @@
 #define PCM_BUF_MASK  (PCM_BUF_SIZE - 1u)
 #define PCM_RING_BASE (PCM_BASE + 8u)
 
+#define VU_PEEK 32u  /* bytes read from ring per VSYNC for level metering */
+#define VU_BAR  10u  /* bar chart width in characters */
+
 typedef struct {
     unsigned char fmt;
     unsigned char frame_sz;
@@ -35,6 +38,8 @@ typedef struct {
 
 static unsigned      wav_wp;
 static unsigned char last_vsync;
+static unsigned char vu_peak_l;
+static unsigned char vu_peak_r;
 
 /* ---- ring buffer --------------------------------------------------------- */
 
@@ -215,6 +220,104 @@ static void feed_vsync(int fd, unsigned long bps,
         *remaining = 0;
 }
 
+/* ---- VU meter ------------------------------------------------------------ */
+
+/*
+ * Read VU_PEEK bytes from the ring buffer in XRAM (just before wav_wp),
+ * compute per-channel peak (0-255) and apply decay to vu_peak_l/r.
+ */
+static void vu_sample(unsigned char fmt, unsigned char frame_sz)
+{
+    static unsigned char buf[VU_PEEK];
+    unsigned i, peek, uv;
+    unsigned char new_l, new_r, lv, rv;
+    int s;
+
+    peek = (wav_wp >= VU_PEEK) ? wav_wp - VU_PEEK : 0u;
+    RIA.addr0 = PCM_RING_BASE + peek;
+    RIA.step0 = 1;
+    for (i = 0; i < VU_PEEK; i++)
+        buf[i] = RIA.rw0;
+
+    new_l = 0; new_r = 0;
+    for (i = 0; i + frame_sz <= VU_PEEK; i += frame_sz) {
+        if (fmt & 2) {
+            /* 8-bit */
+            if (fmt & 4) {
+                /* unsigned (standard WAV 8-bit) */
+                uv = (buf[i] >= 128u) ? buf[i] - 128u : 128u - buf[i];
+            } else {
+                /* signed */
+                s  = (int)(signed char)buf[i];
+                uv = (s < 0) ? (unsigned)(-s) : (unsigned)s;
+            }
+            lv = (unsigned char)(uv > 127u ? 255u : uv * 2u);
+            if (fmt & 1) {
+                rv = lv;
+            } else {
+                if (fmt & 4) {
+                    uv = (buf[i+1] >= 128u) ? buf[i+1] - 128u : 128u - buf[i+1];
+                } else {
+                    s  = (int)(signed char)buf[i+1];
+                    uv = (s < 0) ? (unsigned)(-s) : (unsigned)s;
+                }
+                rv = (unsigned char)(uv > 127u ? 255u : uv * 2u);
+            }
+        } else {
+            /* 16-bit signed */
+            s = (int)((unsigned)buf[i] | ((unsigned)buf[i+1] << 8));
+            if (s < -32767) s = -32767;
+            uv = (s < 0) ? (unsigned)(-s) : (unsigned)s;
+            lv = (unsigned char)(uv >> 7);
+            if (fmt & 1) {
+                rv = lv;
+            } else {
+                s = (int)((unsigned)buf[i+2] | ((unsigned)buf[i+3] << 8));
+                if (s < -32767) s = -32767;
+                uv = (s < 0) ? (unsigned)(-s) : (unsigned)s;
+                rv = (unsigned char)(uv >> 7);
+            }
+        }
+        if (lv > new_l) new_l = lv;
+        if (rv > new_r) new_r = rv;
+    }
+
+    if (new_l > vu_peak_l) vu_peak_l = new_l;
+    else if (vu_peak_l)    vu_peak_l = (unsigned char)(vu_peak_l * 7u / 8u);
+    if (new_r > vu_peak_r) vu_peak_r = new_r;
+    else if (vu_peak_r)    vu_peak_r = (unsigned char)(vu_peak_r * 7u / 8u);
+}
+
+/* Draw two bar lines in place (moves cursor up 2, overwrites). */
+static void vu_draw(void)
+{
+    /* 5 (cursor) + 2 * (3 + 4 + VU_BAR + 4 + VU_BAR + 6) worst case */
+    static char buf[5 + 2 * (3 + 4 + VU_BAR + 4 + VU_BAR + 6)];
+    char *p = buf;
+    unsigned i, bar_l, bar_r;
+
+    bar_l = (unsigned)vu_peak_l * VU_BAR / 255u;
+    bar_r = (unsigned)vu_peak_r * VU_BAR / 255u;
+
+    *p++ = '\033'; *p++ = '['; *p++ = '2'; *p++ = 'A'; *p++ = '\r';
+
+    *p++ = 'L'; *p++ = ' '; *p++ = '[';
+    *p++ = '\033'; *p++ = '['; *p++ = '3'; *p++ = '2'; *p++ = 'm';
+    for (i = 0; i < bar_l; i++) *p++ = '#';
+    *p++ = '\033'; *p++ = '['; *p++ = '0'; *p++ = 'm';
+    for (i = bar_l; i < VU_BAR; i++) *p++ = ' ';
+    *p++ = ']'; *p++ = '\033'; *p++ = '['; *p++ = 'K'; *p++ = '\r'; *p++ = '\n';
+
+    *p++ = 'R'; *p++ = ' '; *p++ = '[';
+    *p++ = '\033'; *p++ = '['; *p++ = '3'; *p++ = '2'; *p++ = 'm';
+    for (i = 0; i < bar_r; i++) *p++ = '#';
+    *p++ = '\033'; *p++ = '['; *p++ = '0'; *p++ = 'm';
+    for (i = bar_r; i < VU_BAR; i++) *p++ = ' ';
+    *p++ = ']'; *p++ = '\033'; *p++ = '['; *p++ = 'K'; *p++ = '\r'; *p++ = '\n';
+
+    write(STDOUT_FILENO, buf, (unsigned)(p - buf));
+}
+
 /* ---- main --------------------------------------------------------------- */
 
 int main(void)
@@ -236,6 +339,8 @@ int main(void)
     remaining = data_size;
     pcm_header_write(p.fmt, PCM_LOG2, p.rate_lo, p.rate_hi);
     pcm_prefill(fd, p.frame_sz, &remaining);
+
+    printf("\033[?25l\r\n\r\n");   /* hide cursor; two blank lines for VU bars */
     xreg(0, 1, 2, PCM_BASE);
 
     last_vsync = RIA.vsync;
@@ -243,12 +348,20 @@ int main(void)
     while (remaining > 0) {
         wait_vsync();
         feed_vsync(fd, bps, &remaining, &bres);
+        vu_sample(p.fmt, p.frame_sz);
+        vu_draw();
     }
 
-    /* Drain: wait until RP2350 read_ptr catches up to write_ptr. */
-    while (pcm_rptr() != wav_wp)
+    while (pcm_rptr() != wav_wp) {
         wait_vsync();
+        vu_sample(p.fmt, p.frame_sz);
+        vu_draw();
+    }
 
+    vu_peak_l = vu_peak_r = 0;
+    vu_draw();
+
+    printf("\033[?25h");           /* show cursor */
     xreg(0, 1, 2, 0xFFFF);
     close(fd);
     printf("Done.\n");
