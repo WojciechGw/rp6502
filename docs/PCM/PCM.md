@@ -80,8 +80,9 @@ Stereo frames are interleaved `[L, R]`; mono frames are `[S]`.
 - Buffer full (one guard frame reserved): `write_ptr == (pcm_read_ptr - frame_size) & mask`.
   Maximum usable content: `(1 << buf_size_log2) - frame_size` bytes.
 - `read_ptr` at +6..+7 — written by the RP2350 IRQ every tick with the current
-  `pcm_read_ptr`. The 6502 reads this field to compute free space without needing
-  VSYNC pacing: `free = (read_ptr - write_ptr - frame_size) & mask`.
+  `pcm_read_ptr`. Safe to read from the 6502 only when updates are infrequent
+  (e.g., once per VSYNC at drain time). Continuous polling from a tight 6502 loop
+  risks a torn 16-bit read that overestimates free space and overwrites unread data.
 
 ### Choosing buf_size_log2
 
@@ -206,9 +207,12 @@ bres -= (unsigned long)chunk * 60ul;   /* carry remainder forward      */
 
 For exact-integer rows, `bres` stays zero and `chunk` is constant each VSYNC.
 
-The drain period (VSYNC frames to wait after the last write) is:
-```
-drain = ceil((1 << buf_size_log2) * 60 / bps) + 1
+After the last write, wait until the RP2350's `read_ptr` (at +6..+7) equals
+`write_ptr`.  Reading once per VSYNC is sufficient and avoids torn-read issues:
+
+```c
+while (pcm_rptr() != wav_wp)
+    wait_vsync();
 ```
 
 ## Audio playback and the 6502 main loop

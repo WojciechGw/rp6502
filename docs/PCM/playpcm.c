@@ -33,7 +33,8 @@ typedef struct {
     unsigned char rate_hi;
 } pcm_params_t;
 
-static unsigned wav_wp;
+static unsigned      wav_wp;
+static unsigned char last_vsync;
 
 /* ---- ring buffer --------------------------------------------------------- */
 
@@ -173,6 +174,10 @@ static void pcm_prefill(int fd, unsigned frame_sz, unsigned long *remaining)
     *remaining -= (unsigned long)n;
 }
 
+/*
+ * Read read_ptr written by RP2350 at +6..+7.  Called at drain time only
+ * (once per VSYNC) so torn-read probability is negligible.
+ */
 static unsigned pcm_rptr(void)
 {
     unsigned lo, hi;
@@ -183,10 +188,31 @@ static unsigned pcm_rptr(void)
     return lo | (hi << 8);
 }
 
-static unsigned pcm_free(unsigned frame_sz)
+static void wait_vsync(void)
 {
-    unsigned free = (pcm_rptr() - wav_wp - frame_sz) & PCM_BUF_MASK;
-    return free & ~((unsigned)(frame_sz - 1u));
+    while (RIA.vsync == last_vsync)
+        ;
+    last_vsync = RIA.vsync;
+}
+
+/*
+ * Bresenham feeder: called once per VSYNC.
+ * Distributes fractional bytes/VSYNC evenly across frames.
+ */
+static void feed_vsync(int fd, unsigned long bps,
+                       unsigned long *remaining, unsigned long *bres)
+{
+    unsigned chunk, n;
+    *bres += bps;
+    chunk = (unsigned)(*bres / 60ul);
+    *bres -= (unsigned long)chunk * 60ul;
+    if ((unsigned long)chunk > *remaining)
+        chunk = (unsigned)*remaining;
+    n = ring_write(fd, chunk);
+    if (n > 0)
+        *remaining -= (unsigned long)n;
+    else
+        *remaining = 0;
 }
 
 /* ---- main --------------------------------------------------------------- */
@@ -194,14 +220,15 @@ static unsigned pcm_free(unsigned frame_sz)
 int main(void)
 {
     int fd;
-    unsigned wav_channels, wav_bits, chunk, n;
-    unsigned long wav_rate, data_size, remaining;
+    unsigned wav_channels, wav_bits;
+    unsigned long wav_rate, data_size, remaining, bres, bps;
     pcm_params_t p;
 
     if (wav_open("test.wav", &fd, &wav_channels, &wav_rate, &wav_bits, &data_size) != 0)
         return 1;
 
     pcm_derive(wav_channels, wav_bits, wav_rate, &p);
+    bps = wav_rate * (unsigned long)p.frame_sz;
     printf("Playing %lu bytes, %u ch, %lu Hz, %u-bit...\n",
            data_size, wav_channels, wav_rate, wav_bits);
 
@@ -211,18 +238,16 @@ int main(void)
     pcm_prefill(fd, p.frame_sz, &remaining);
     xreg(0, 1, 2, PCM_BASE);
 
+    last_vsync = RIA.vsync;
+    bres = 0;
     while (remaining > 0) {
-        chunk = pcm_free(p.frame_sz);
-        if (chunk > 0) {
-            if ((unsigned long)chunk > remaining)
-                chunk = (unsigned)remaining;
-            n = ring_write(fd, chunk);
-            if (n > 0) remaining -= (unsigned long)n; else remaining = 0;
-        }
+        wait_vsync();
+        feed_vsync(fd, bps, &remaining, &bres);
     }
 
+    /* Drain: wait until RP2350 read_ptr catches up to write_ptr. */
     while (pcm_rptr() != wav_wp)
-        ;
+        wait_vsync();
 
     xreg(0, 1, 2, 0xFFFF);
     close(fd);
