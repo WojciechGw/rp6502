@@ -109,6 +109,34 @@ buf_size_log2 ≥ 9 provides adequate read margin at all supported rates.
 For once-per-VSYNC feeding at 60 Hz with 44 100 Hz stereo, log2 = 12 (≈23 ms)
 covers the 16.7 ms frame with margin. Lower rates or mono need smaller buffers.
 
+## CPU overhead per VSYNC (600 KB/s SD)
+
+Each VSYNC the 6502 calls `read_xram` to refill the ring buffer.  The RP2350
+performs the DMA while the 6502 blocks.  At SD throughput of 600 KB/s and
+60 Hz VSYNC (16.7 ms budget):
+
+| Format                      | Bytes/VSYNC | read_xram | Remaining |
+|-----------------------------|:-----------:|:---------:|:---------:|
+| 44 100 Hz stereo 16-bit     | 2940        | ~4.8 ms   | ~11.9 ms  |
+| 22 050 Hz stereo 16-bit     | 1470        | ~2.4 ms   | ~14.3 ms  |
+| 22 050 Hz mono 16-bit       |  735        | ~1.2 ms   | ~15.5 ms  |
+| 22 050 Hz stereo 8-bit      |  735        | ~1.2 ms   | ~15.5 ms  |
+| 22 050 Hz mono 8-bit        |  368        | ~0.6 ms   | ~16.1 ms  |
+| 11 025 Hz mono 8-bit        |  184        | ~0.3 ms   | ~16.4 ms  |
+|  8 000 Hz mono 8-bit        |  133        | ~0.2 ms   | ~16.5 ms  |
+
+## Recommendations for games
+
+Use PSG or OPL for background music — register writes cost nothing in terms of
+streaming, so the 6502 is never blocked on audio I/O between frames.
+
+Reserve PCM for short sound effects at ≤ 22 050 Hz mono 8-bit.  At that rate
+`read_xram` blocks the 6502 for under 1 ms per VSYNC, leaving virtually the
+entire frame for game logic.
+
+44 100 Hz stereo 16-bit is suitable for a dedicated audio player (such as
+`playpcm.c`) where the 6502 has no other work to do.
+
 ## XREG activation
 
 XREG device = RIA (0), channel = 1 (audio), address = 2 (PCM).
