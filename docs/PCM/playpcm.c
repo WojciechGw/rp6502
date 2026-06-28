@@ -3,7 +3,8 @@
  *
  * Plays test.wav using the PCM audio driver (XREG channel 0x102).
  * Format is detected automatically from the WAV header.
- * Supported: AudioFormat=PCM, 1-2 channels, 8000/11025/22050/44100 Hz,
+ * Supported: AudioFormat=PCM, 1-2 channels,
+ *            8000/11025/16000/22050/32000/44100 Hz,
  *            16-bit signed or 8-bit unsigned.
  *
  * XREG: device=0 (RIA), channel=1 (audio), address=2 (PCM), word=XRAM base
@@ -25,10 +26,16 @@
 #define PCM_BUF_MASK  (PCM_BUF_SIZE - 1u)
 #define PCM_RING_BASE (PCM_BASE + 8u)
 
-/* 6502-local mirror of write_ptr */
+typedef struct {
+    unsigned char fmt;
+    unsigned char frame_sz;
+    unsigned char rate_lo;
+    unsigned char rate_hi;
+} pcm_params_t;
+
 static unsigned wav_wp;
 
-/* ---- helpers ------------------------------------------------------------ */
+/* ---- ring buffer --------------------------------------------------------- */
 
 static void wp_flush(void)
 {
@@ -90,126 +97,133 @@ static unsigned read_le16(const unsigned char *p)
     return (unsigned)p[0] | ((unsigned)p[1] << 8);
 }
 
-/* ---- main --------------------------------------------------------------- */
+/* ---- playback helpers --------------------------------------------------- */
 
-int main(void)
+static int wav_open(const char *name, int *fd_out,
+                    unsigned *channels, unsigned long *rate,
+                    unsigned *bits, unsigned long *data_size)
 {
-    int fd;
     unsigned char hdr[44];
-    unsigned long data_size, remaining, bres, wav_rate;
-    unsigned chunk, n, drain, wav_channels, wav_bits, frame_sz;
-    unsigned long bps;
-    unsigned char last_vsync, pcm_fmt, rate_lo, rate_hi;
+    int fd;
 
-    fd = open("test.wav", O_RDONLY);
+    fd = open(name, O_RDONLY);
     if (fd < 0) {
-        printf("Cannot open test.wav\n");
-        return 1;
+        printf("Cannot open %s\n", name);
+        return -1;
     }
-
-    /* Validate header structure (simple 44-byte layout, no LIST chunks). */
     if (read(fd, hdr, 44) != 44
         || memcmp(hdr,      "RIFF", 4) != 0
         || memcmp(hdr +  8, "WAVE", 4) != 0
         || memcmp(hdr + 12, "fmt ", 4) != 0
         || memcmp(hdr + 36, "data", 4) != 0) {
-        printf("test.wav: not a simple 44-byte-header WAV\n");
+        printf("%s: not a simple 44-byte-header WAV\n", name);
         close(fd);
-        return 1;
+        return -1;
     }
-
-    wav_channels = read_le16(hdr + 22);
-    wav_rate     = read_le32(hdr + 24);
-    wav_bits     = read_le16(hdr + 34);
-
+    *channels  = read_le16(hdr + 22);
+    *rate      = read_le32(hdr + 24);
+    *bits      = read_le16(hdr + 34);
+    *data_size = read_le32(hdr + 40);
     if (read_le16(hdr + 20) != 1u
-        || (wav_channels != 1u && wav_channels != 2u)
-        || (wav_bits != 8u && wav_bits != 16u)
-        || (wav_rate != 8000ul  && wav_rate != 11025ul && wav_rate != 16000ul
-         && wav_rate != 22050ul && wav_rate != 32000ul && wav_rate != 44100ul)) {
-        printf("test.wav: unsupported format\n");
+        || (*channels != 1u && *channels != 2u)
+        || (*bits != 8u && *bits != 16u)
+        || (*rate != 8000ul  && *rate != 11025ul && *rate != 16000ul
+         && *rate != 22050ul && *rate != 32000ul && *rate != 44100ul)) {
+        printf("%s: unsupported format\n", name);
         close(fd);
-        return 1;
+        return -1;
     }
+    *fd_out = fd;
+    return 0;
+}
 
-    /* Derive PCM driver parameters from WAV fields.
-     * WAV 8-bit is always unsigned; 16-bit is always signed. */
-    pcm_fmt = 0;
-    if (wav_channels == 1u) pcm_fmt |= 0x01u;  /* mono  */
-    if (wav_bits    == 8u)  pcm_fmt |= 0x06u;  /* 8-bit unsigned */
+static void pcm_derive(unsigned channels, unsigned bits, unsigned long rate,
+                       pcm_params_t *p)
+{
+    p->fmt    = 0;
+    if (channels == 1u) p->fmt |= 0x01u;
+    if (bits    == 8u)  p->fmt |= 0x06u;
+    p->frame_sz = (unsigned char)(channels * (bits / 8u));
+    p->rate_lo  = (unsigned char)(rate & 0xFFul);
+    p->rate_hi  = (unsigned char)((rate >> 8) & 0xFFul);
+}
 
-    frame_sz = wav_channels * (wav_bits / 8u);
-    bps      = wav_rate * (unsigned long)frame_sz;
-    rate_lo  = (unsigned char)(wav_rate & 0xFFul);
-    rate_hi  = (unsigned char)((wav_rate >> 8) & 0xFFul);
-
-    data_size = read_le32(hdr + 40);
-    printf("Playing %lu bytes, %u ch, %lu Hz, %u-bit...\n",
-           data_size, wav_channels, wav_rate, wav_bits);
-
-    /* --- Init XRAM control header (8 bytes) ------------------------------ */
+static void pcm_header_write(unsigned char fmt, unsigned char log2,
+                             unsigned char rate_lo, unsigned char rate_hi)
+{
     RIA.addr0 = PCM_BASE;
     RIA.step0 = 1;
     RIA.rw0 = 0;        /* write_ptr lo   */
     RIA.rw0 = 0;        /* write_ptr hi   */
-    RIA.rw0 = pcm_fmt;  /* format         */
-    RIA.rw0 = PCM_LOG2; /* buf_size_log2  */
+    RIA.rw0 = fmt;      /* format         */
+    RIA.rw0 = log2;     /* buf_size_log2  */
     RIA.rw0 = rate_lo;  /* sample_rate lo */
     RIA.rw0 = rate_hi;  /* sample_rate hi */
-    RIA.rw0 = 0;        /* reserved       */
-    RIA.rw0 = 0;        /* reserved       */
+    RIA.rw0 = 0;        /* read_ptr lo    */
+    RIA.rw0 = 0;        /* read_ptr hi    */
+}
+
+static void pcm_prefill(int fd, unsigned frame_sz, unsigned long *remaining)
+{
+    unsigned chunk = PCM_BUF_SIZE - frame_sz;
+    unsigned n;
+    if ((unsigned long)chunk > *remaining)
+        chunk = (unsigned)*remaining;
+    n = ring_write(fd, chunk);
+    *remaining -= (unsigned long)n;
+}
+
+static unsigned pcm_rptr(void)
+{
+    unsigned lo, hi;
+    RIA.addr0 = PCM_BASE + 6;
+    RIA.step0 = 1;
+    lo = RIA.rw0;
+    hi = RIA.rw0;
+    return lo | (hi << 8);
+}
+
+static unsigned pcm_free(unsigned frame_sz)
+{
+    unsigned free = (pcm_rptr() - wav_wp - frame_sz) & PCM_BUF_MASK;
+    return free & ~((unsigned)(frame_sz - 1u));
+}
+
+/* ---- main --------------------------------------------------------------- */
+
+int main(void)
+{
+    int fd;
+    unsigned wav_channels, wav_bits, chunk, n;
+    unsigned long wav_rate, data_size, remaining;
+    pcm_params_t p;
+
+    if (wav_open("test.wav", &fd, &wav_channels, &wav_rate, &wav_bits, &data_size) != 0)
+        return 1;
+
+    pcm_derive(wav_channels, wav_bits, wav_rate, &p);
+    printf("Playing %lu bytes, %u ch, %lu Hz, %u-bit...\n",
+           data_size, wav_channels, wav_rate, wav_bits);
 
     wav_wp    = 0;
     remaining = data_size;
-
-    /* --- Pre-fill ring buffer (leave one guard frame empty) -------------- */
-    chunk = PCM_BUF_SIZE - frame_sz;
-    if ((unsigned long)chunk > remaining)
-        chunk = (unsigned)remaining;
-    n = ring_write(fd, chunk);
-    remaining -= (unsigned long)n;
-
-    /* --- Activate PCM driver --------------------------------------------- */
+    pcm_header_write(p.fmt, PCM_LOG2, p.rate_lo, p.rate_hi);
+    pcm_prefill(fd, p.frame_sz, &remaining);
     xreg(0, 1, 2, PCM_BASE);
 
-    last_vsync = RIA.vsync;
-    bres = 0;
-
-    /* --- Main loop: Bresenham accumulator feeds correct bytes per VSYNC -- *
-     *
-     * bres accumulates fractional bytes across frames, distributing them
-     * evenly.  For rates where bps is an exact multiple of 60, bres stays
-     * zero and chunk is constant each VSYNC.
-     */
     while (remaining > 0) {
-        while (RIA.vsync == last_vsync)
-            ;
-        last_vsync = RIA.vsync;
-
-        bres += bps;
-        chunk = (unsigned)(bres / 60ul);
-        bres -= (unsigned long)chunk * 60ul;
-
-        if ((unsigned long)chunk > remaining)
-            chunk = (unsigned)remaining;
-
-        n = ring_write(fd, chunk);
-        if (n > 0)
-            remaining -= (unsigned long)n;
-        else
-            remaining = 0;
+        chunk = pcm_free(p.frame_sz);
+        if (chunk > 0) {
+            if ((unsigned long)chunk > remaining)
+                chunk = (unsigned)remaining;
+            n = ring_write(fd, chunk);
+            if (n > 0) remaining -= (unsigned long)n; else remaining = 0;
+        }
     }
 
-    /* --- Wait for the ring buffer to drain ------------------------------- */
-    drain = (unsigned)((PCM_BUF_SIZE * 60ul + bps - 1ul) / bps) + 1u;
-    while (drain > 0) {
-        while (RIA.vsync == last_vsync)
-            ;
-        last_vsync = RIA.vsync;
-        drain--;
-    }
+    while (pcm_rptr() != wav_wp)
+        ;
 
-    /* --- Stop driver ----------------------------------------------------- */
     xreg(0, 1, 2, 0xFFFF);
     close(fd);
     printf("Done.\n");

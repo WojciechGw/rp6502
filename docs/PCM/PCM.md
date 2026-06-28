@@ -35,7 +35,7 @@ Offset          Type      Owner   Description
 +2              uint8_t   6502    format — bit 0=mono, bit 1=8-bit, bit 2=unsigned
 +3              uint8_t   6502    buf_size_log2 — 9..13; 0 or invalid → 10
 +4..+5          uint16_t  6502    sample_rate LE — 8000/11025/16000/22050/32000/44100; 0 → 44100
-+6..+7          —         —       reserved
++6..+7          uint16_t  RP2350  read_ptr LE — pcm_read_ptr, updated by RP2350 each IRQ
 +8 .. +8+N-1    uint8_t[] 6502    ring buffer (N = 1 << buf_size_log2 bytes)
 ```
 
@@ -79,6 +79,9 @@ Stereo frames are interleaved `[L, R]`; mono frames are `[S]`.
 - Buffer empty: `write_ptr == pcm_read_ptr` → IRQ outputs silence.
 - Buffer full (one guard frame reserved): `write_ptr == (pcm_read_ptr - frame_size) & mask`.
   Maximum usable content: `(1 << buf_size_log2) - frame_size` bytes.
+- `read_ptr` at +6..+7 — written by the RP2350 IRQ every tick with the current
+  `pcm_read_ptr`. The 6502 reads this field to compute free space without needing
+  VSYNC pacing: `free = (read_ptr - write_ptr - frame_size) & mask`.
 
 ### Choosing buf_size_log2
 

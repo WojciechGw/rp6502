@@ -28,7 +28,7 @@ static inline void DBG(const char *fmt, ...) { (void)fmt; }
  *   [+2]      uint8_t  format        - bit 0=mono, bit 1=8-bit, bit 2=unsigned
  *   [+3]      uint8_t  buf_size_log2 - 9..13; 0 or invalid → 10
  *   [+4..+5]  uint16_t sample_rate   - 8000/11025/16000/22050/32000/44100 LE; 0 → 44100
- *   [+6..+7]  reserved
+ *   [+6..+7]  uint16_t read_ptr  - pcm_read_ptr written by RP2350 each IRQ
  *   [+8..]    ring buffer            - (1 << buf_size_log2) bytes
  *
  * Ring buffer byte layout per frame:
@@ -107,6 +107,8 @@ static void
         }
         pcm_read_ptr = (pcm_read_ptr + fsz) & mask;
     }
+    xram[base + 6] = (uint8_t)pcm_read_ptr;
+    xram[base + 7] = (uint8_t)(pcm_read_ptr >> 8);
     int16_t bel_mix = bel_sample(rate);
     next_l += bel_mix;
     next_r += bel_mix;
