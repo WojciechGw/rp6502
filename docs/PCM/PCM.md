@@ -34,7 +34,7 @@ Offset          Type      Owner   Description
 +0..+1          uint16_t  6502    write_ptr — byte index into ring buffer
 +2              uint8_t   6502    format — bit 0=mono, bit 1=8-bit, bit 2=unsigned
 +3              uint8_t   6502    buf_size_log2 — 9..13; 0 or invalid → 10
-+4..+5          uint16_t  6502    sample_rate LE — 8000/11025/22050/44100; 0 → 44100
++4..+5          uint16_t  6502    sample_rate LE — 8000/11025/16000/22050/32000/44100; 0 → 44100
 +6..+7          —         —       reserved
 +8 .. +8+N-1    uint8_t[] 6502    ring buffer (N = 1 << buf_size_log2 bytes)
 ```
@@ -151,6 +151,63 @@ xreg(0, 1, 2, PCM_BASE);
 /* 5. Feed bytes_per_vsync bytes each VSYNC; handle ring wrap */
 ```
 
+## Format configuration reference
+
+`playpcm.c` detects format automatically from the WAV header:
+
+```c
+wav_channels = read_le16(hdr + 22);   /* 1 or 2 */
+wav_rate     = read_le32(hdr + 24);   /* 8000 / 11025 / 16000 / 22050 / 32000 / 44100 */
+wav_bits     = read_le16(hdr + 34);   /* 8 or 16 */
+
+pcm_fmt = 0;
+if (wav_channels == 1) pcm_fmt |= 0x01;  /* mono          */
+if (wav_bits    == 8)  pcm_fmt |= 0x06;  /* 8-bit unsigned*/
+
+frame_sz = wav_channels * (wav_bits / 8);
+bps      = wav_rate * (unsigned long)frame_sz;
+```
+
+The `format` and `sample_rate` fields are written to the XRAM header before
+calling `xreg()`. No manual configuration is required.
+
+Bytes consumed per 60 Hz VSYNC (`bps / 60`) for common WAV variants:
+
+| WAV file                        | format | bytes/s  | bytes/VSYNC @60 Hz |
+|---------------------------------|:------:|:--------:|:------------------:|
+| 44 100 Hz stereo 16-bit signed  | `0x00` | 176 400  | 2940               |
+| 44 100 Hz mono   16-bit signed  | `0x01` |  88 200  | 1470               |
+| 44 100 Hz stereo  8-bit unsigned| `0x06` |  88 200  | 1470               |
+| 44 100 Hz mono    8-bit unsigned| `0x07` |  44 100  | 735                |
+| 32 000 Hz stereo 16-bit signed  | `0x00` | 128 000  | 2133.3 ✗           |
+| 32 000 Hz mono    8-bit unsigned| `0x07` |  32 000  | 533.3 ✗            |
+| 22 050 Hz stereo 16-bit signed  | `0x00` |  88 200  | 1470               |
+| 22 050 Hz mono   16-bit signed  | `0x01` |  44 100  | 735                |
+| 22 050 Hz stereo  8-bit unsigned| `0x06` |  44 100  | 735                |
+| 22 050 Hz mono    8-bit unsigned| `0x07` |  22 050  | 367.5 ✗            |
+| 16 000 Hz stereo 16-bit signed  | `0x00` |  64 000  | 1066.7 ✗           |
+| 16 000 Hz mono    8-bit unsigned| `0x07` |  16 000  | 266.7 ✗            |
+| 11 025 Hz stereo 16-bit signed  | `0x00` |  44 100  | 735                |
+| 11 025 Hz mono   16-bit signed  | `0x01` |  22 050  | 367.5 ✗            |
+| 8 000 Hz stereo 16-bit signed   | `0x00` |  32 000  | 533.3 ✗            |
+| 8 000 Hz mono    8-bit unsigned | `0x07` |   8 000  | 133.3 ✗            |
+
+Rows marked ✗ have a fractional bytes-per-VSYNC. `playpcm.c` handles all rows
+with a Bresenham accumulator that distributes the fractional part evenly:
+
+```c
+bres += bps;                           /* accumulate bytes this second */
+chunk = (unsigned)(bres / 60ul);       /* integer bytes to write now   */
+bres -= (unsigned long)chunk * 60ul;   /* carry remainder forward      */
+```
+
+For exact-integer rows, `bres` stays zero and `chunk` is constant each VSYNC.
+
+The drain period (VSYNC frames to wait after the last write) is:
+```
+drain = ceil((1 << buf_size_log2) * 60 / bps) + 1
+```
+
 ## Audio playback and the 6502 main loop
 
 The RP2350 IRQ runs at the configured `sample_rate` fully autonomously. VSYNC,
@@ -158,12 +215,9 @@ NMI, and IRQ on the 6502 side do not interrupt or pause playback.
 
 The 6502 application must keep the ring buffer supplied. The consumption rate
 is `sample_rate × bytes_per_frame` bytes/second (see the format table above).
-Pre-filling the buffer before activation and then writing a fixed number of
-bytes each VSYNC keeps the buffer at a steady level without tracking the
-RP2350's internal read pointer.
-
-At 44 100 Hz stereo 16-bit the driver consumes exactly 2 940 bytes per 60 Hz
-VSYNC frame (44 100 × 4 / 60 = 2 940, an exact integer).
+Pre-filling the buffer before activation and then writing the Bresenham-computed
+number of bytes each VSYNC keeps the buffer at a steady level without tracking
+the RP2350's internal read pointer.
 
 ## Stopping
 

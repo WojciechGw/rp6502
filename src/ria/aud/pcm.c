@@ -27,7 +27,7 @@ static inline void DBG(const char *fmt, ...) { (void)fmt; }
  *   [+0..+1]  uint16_t write_ptr     - byte index into ring, maintained by 6502
  *   [+2]      uint8_t  format        - bit 0=mono, bit 1=8-bit, bit 2=unsigned
  *   [+3]      uint8_t  buf_size_log2 - 9..13; 0 or invalid → 10
- *   [+4..+5]  uint16_t sample_rate   - 8000/11025/22050/44100 LE; 0 → 44100
+ *   [+4..+5]  uint16_t sample_rate   - 8000/11025/16000/22050/32000/44100 LE; 0 → 44100
  *   [+6..+7]  reserved
  *   [+8..]    ring buffer            - (1 << buf_size_log2) bytes
  *
@@ -138,7 +138,8 @@ bool pcm_xreg(uint16_t word)
         log2 = PCM_BUF_LOG2_DEF;
     uint8_t  fmt  = xram[word + 2];
     uint16_t rate = (uint16_t)xram[word + 4] | ((uint16_t)xram[word + 5] << 8);
-    if (rate != 8000 && rate != 11025 && rate != 22050 && rate != 44100)
+    if (rate != 8000  && rate != 11025 && rate != 16000
+     && rate != 22050 && rate != 32000 && rate != 44100)
         rate = 44100;
     uint8_t fsz = (fmt & 2) ? ((fmt & 1) ? 1 : 2)
                              : ((fmt & 1) ? 2 : 4);

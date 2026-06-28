@@ -2,7 +2,9 @@
  * playpcm.c - WAV audio playback example for RP6502 (cc65 / C89)
  *
  * Plays test.wav using the PCM audio driver (XREG channel 0x102).
- * Requires: 16-bit signed stereo PCM, 44 100 Hz, standard 44-byte WAV header.
+ * Format is detected automatically from the WAV header.
+ * Supported: AudioFormat=PCM, 1-2 channels, 8000/11025/22050/44100 Hz,
+ *            16-bit signed or 8-bit unsigned.
  *
  * XREG: device=0 (RIA), channel=1 (audio), address=2 (PCM), word=XRAM base
  *
@@ -14,21 +16,14 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdint.h>
 
 /* XRAM region for PCM driver.  Must be 4-byte aligned.
- * Total size: 4 (ctrl) + PCM_BUF_SIZE (ring) = 4100 bytes. */
+ * Total: 8 (header) + PCM_BUF_SIZE (ring) bytes. */
 #define PCM_BASE      0x4000u
-#define PCM_LOG2      12            /* 4096-byte ring, ~23 ms at 44100 Hz */
+#define PCM_LOG2      12u
 #define PCM_BUF_SIZE  (1u << PCM_LOG2)
 #define PCM_BUF_MASK  (PCM_BUF_SIZE - 1u)
 #define PCM_RING_BASE (PCM_BASE + 8u)
-
-/* Bytes consumed per 60 Hz VSYNC: 44100 * 4 / 60 = 2940 */
-#define BYTES_PER_VSYNC 2940u
-
-/* Maximum bytes to pre-fill (one guard frame kept empty) */
-#define PCM_PREFILL (PCM_BUF_SIZE - 4u)
 
 /* 6502-local mirror of write_ptr */
 static unsigned wav_wp;
@@ -64,7 +59,6 @@ static unsigned ring_write(int fd, unsigned count)
         return (n1 > 0) ? (unsigned)n1 : 0u;
     }
 
-    /* Write to end of ring, then wrap and write remainder */
     n1 = read_xram(PCM_RING_BASE + wav_wp, to_end, fd);
     if (n1 <= 0)
         return 0u;
@@ -102,10 +96,10 @@ int main(void)
 {
     int fd;
     unsigned char hdr[44];
-    unsigned long data_size, remaining;
-    unsigned chunk, n;
-    unsigned char last_vsync;
-    unsigned char drain;
+    unsigned long data_size, remaining, bres, wav_rate;
+    unsigned chunk, n, drain, wav_channels, wav_bits, frame_sz;
+    unsigned long bps;
+    unsigned char last_vsync, pcm_fmt, rate_lo, rate_hi;
 
     fd = open("test.wav", O_RDONLY);
     if (fd < 0) {
@@ -113,7 +107,7 @@ int main(void)
         return 1;
     }
 
-    /* Validate a simple 44-byte WAV header (no LIST or extra chunks). */
+    /* Validate header structure (simple 44-byte layout, no LIST chunks). */
     if (read(fd, hdr, 44) != 44
         || memcmp(hdr,      "RIFF", 4) != 0
         || memcmp(hdr +  8, "WAVE", 4) != 0
@@ -123,35 +117,53 @@ int main(void)
         close(fd);
         return 1;
     }
-    if (read_le16(hdr + 20) != 1u       /* PCM, uncompressed */
-        || read_le16(hdr + 22) != 2u    /* stereo             */
-        || read_le32(hdr + 24) != 44100ul /* 44100 Hz          */
-        || read_le16(hdr + 34) != 16u) { /* 16-bit            */
-        printf("test.wav: need PCM stereo 44100 Hz 16-bit\n");
+
+    wav_channels = read_le16(hdr + 22);
+    wav_rate     = read_le32(hdr + 24);
+    wav_bits     = read_le16(hdr + 34);
+
+    if (read_le16(hdr + 20) != 1u
+        || (wav_channels != 1u && wav_channels != 2u)
+        || (wav_bits != 8u && wav_bits != 16u)
+        || (wav_rate != 8000ul  && wav_rate != 11025ul && wav_rate != 16000ul
+         && wav_rate != 22050ul && wav_rate != 32000ul && wav_rate != 44100ul)) {
+        printf("test.wav: unsupported format\n");
         close(fd);
         return 1;
     }
 
+    /* Derive PCM driver parameters from WAV fields.
+     * WAV 8-bit is always unsigned; 16-bit is always signed. */
+    pcm_fmt = 0;
+    if (wav_channels == 1u) pcm_fmt |= 0x01u;  /* mono  */
+    if (wav_bits    == 8u)  pcm_fmt |= 0x06u;  /* 8-bit unsigned */
+
+    frame_sz = wav_channels * (wav_bits / 8u);
+    bps      = wav_rate * (unsigned long)frame_sz;
+    rate_lo  = (unsigned char)(wav_rate & 0xFFul);
+    rate_hi  = (unsigned char)((wav_rate >> 8) & 0xFFul);
+
     data_size = read_le32(hdr + 40);
-    printf("Playing %lu bytes...\n", data_size);
+    printf("Playing %lu bytes, %u ch, %lu Hz, %u-bit...\n",
+           data_size, wav_channels, wav_rate, wav_bits);
 
     /* --- Init XRAM control header (8 bytes) ------------------------------ */
     RIA.addr0 = PCM_BASE;
     RIA.step0 = 1;
-    RIA.rw0 = 0;           /* write_ptr lo        */
-    RIA.rw0 = 0;           /* write_ptr hi        */
-    RIA.rw0 = 0;           /* format: signed 16-bit stereo */
-    RIA.rw0 = PCM_LOG2;    /* buf_size_log2       */
-    RIA.rw0 = 0x44;        /* sample_rate lo (44100 = 0xAC44) */
-    RIA.rw0 = 0xAC;        /* sample_rate hi      */
-    RIA.rw0 = 0;           /* reserved            */
-    RIA.rw0 = 0;           /* reserved            */
+    RIA.rw0 = 0;        /* write_ptr lo   */
+    RIA.rw0 = 0;        /* write_ptr hi   */
+    RIA.rw0 = pcm_fmt;  /* format         */
+    RIA.rw0 = PCM_LOG2; /* buf_size_log2  */
+    RIA.rw0 = rate_lo;  /* sample_rate lo */
+    RIA.rw0 = rate_hi;  /* sample_rate hi */
+    RIA.rw0 = 0;        /* reserved       */
+    RIA.rw0 = 0;        /* reserved       */
 
-    wav_wp = 0;
+    wav_wp    = 0;
     remaining = data_size;
 
-    /* --- Pre-fill ring buffer before activating the driver --------------- */
-    chunk = PCM_PREFILL;
+    /* --- Pre-fill ring buffer (leave one guard frame empty) -------------- */
+    chunk = PCM_BUF_SIZE - frame_sz;
     if ((unsigned long)chunk > remaining)
         chunk = (unsigned)remaining;
     n = ring_write(fd, chunk);
@@ -161,20 +173,23 @@ int main(void)
     xreg(0, 1, 2, PCM_BASE);
 
     last_vsync = RIA.vsync;
+    bres = 0;
 
-    /* --- Main loop: feed buffer once per VSYNC --------------------------- *
+    /* --- Main loop: Bresenham accumulator feeds correct bytes per VSYNC -- *
      *
-     * At 44 100 Hz stereo 16-bit the driver consumes 2 940 bytes per 60 Hz
-     * VSYNC frame.  Pre-filling PCM_PREFILL bytes and then writing exactly
-     * BYTES_PER_VSYNC per frame keeps the buffer at a steady level without
-     * needing to read the RP2350's internal read pointer.
+     * bres accumulates fractional bytes across frames, distributing them
+     * evenly.  For rates where bps is an exact multiple of 60, bres stays
+     * zero and chunk is constant each VSYNC.
      */
     while (remaining > 0) {
         while (RIA.vsync == last_vsync)
             ;
         last_vsync = RIA.vsync;
 
-        chunk = BYTES_PER_VSYNC;
+        bres += bps;
+        chunk = (unsigned)(bres / 60ul);
+        bres -= (unsigned long)chunk * 60ul;
+
         if ((unsigned long)chunk > remaining)
             chunk = (unsigned)remaining;
 
@@ -185,11 +200,8 @@ int main(void)
             remaining = 0;
     }
 
-    /* --- Wait for the ring buffer to drain ------------------------------- *
-     * Buffer holds up to PCM_PREFILL bytes (~23 ms at 44100 Hz stereo).
-     * Three VSYNC periods (50 ms) is more than sufficient.
-     */
-    drain = 3;
+    /* --- Wait for the ring buffer to drain ------------------------------- */
+    drain = (unsigned)((PCM_BUF_SIZE * 60ul + bps - 1ul) / bps) + 1u;
     while (drain > 0) {
         while (RIA.vsync == last_vsync)
             ;
