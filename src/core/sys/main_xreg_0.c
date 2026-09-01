@@ -15,6 +15,7 @@
 
 #include "core/main.h"
 #include "core/aud/opl.h"
+#include "core/aud/pcm.h"
 #include "core/aud/psg.h"
 #include "core/hid/hid.h"
 #include "core/hid/keyboard.h"
@@ -47,12 +48,14 @@ bool main_xreg_0(uint8_t channel, uint8_t address, uint16_t word)
         hid_remapped();
         return ok;
     }
-    if (channel == 1) /* audio: PSG at address 0, OPL at address 1 */
+    if (channel == 1) /* audio: PSG at address 0, OPL at address 1, PCM at address 2 */
     {
         if (address == 0)
             return psg_xreg(word);
         if (address == 1)
             return opl_xreg(word);
+        if (address == 2)
+            return pcm_xreg(word);
         return false;
     }
     return false;
