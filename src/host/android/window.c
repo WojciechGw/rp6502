@@ -7,20 +7,20 @@
  * NativeActivity glue owns the real entry point), the native gamepad/menu input
  * hook, the on-screen ROM-select menu (sdtx overlay + storage scanning + JNI
  * all-files-access permission), and the host_window_* hooks. The render/frame/
- * present pipeline is in app/window_core.c.
+ * present pipeline is in host/sokol/window_core.c.
  */
 
-#include "emu/app/window.h"
-#include "emu/app/window_core.h"
+#include "host/sokol/window.h"
+#include "host/sokol/window_core.h"
 #include "sokol/sokol_app.h"
 #include "sokol/sokol_gfx.h" /* sokol_debugtext.h needs sg_* types declared first */
 #include "sokol/sokol_log.h"
 #include "sokol/util/sokol_debugtext.h"
-#include "emu/hid/pad.h"
-#include "emu/main.h"
-#include "emu/emu/rom.h"
-#include "emu/sys/cpu.h"
-#include "emu/sys/vga.h"
+#include "core/hid/gamepad.h"
+#include "core/sys/main.h"
+#include "core/sys/rom.h"
+#include "core/wdc/cpu.h"
+#include "core/vga/vga_emu.h"
 #include <android/input.h>
 #include <android/keycodes.h>
 #include <android/native_activity.h>
@@ -239,7 +239,7 @@ bool rp6502_android_input_hook(const void* native_event)
                             g_android_ry = 0;
                             g_android_lt = 0;
                             g_android_rt = 0;
-                            pad_connect(0, true);
+                            gamepad_connect(0, true, GAMEPAD_TYPE_UNKNOWN, true);
                             g_android_menu_active = false;
                         }
                         return 1;
@@ -333,11 +333,9 @@ bool rp6502_android_input_hook(const void* native_event)
             default:
                 return 0; // Not handled
         }
-        // Sticks unconditionally: the motion handler reads AXIS_X/Y/Z/RZ from
-        // whatever is attached. Android never says whose labels these are.
-        pad_host_report(0, g_android_dpad, g_android_button0, g_android_button1,
-                        g_android_lx, g_android_ly, g_android_rx, g_android_ry,
-                        g_android_lt, g_android_rt, PAD_TYPE_UNKNOWN, true);
+        gamepad_host_report(0, g_android_dpad, g_android_button0, g_android_button1,
+                            g_android_lx, g_android_ly, g_android_rx, g_android_ry,
+                        g_android_lt, g_android_rt);
         return 1; // Handled
     }
     else if (type == AINPUT_EVENT_TYPE_MOTION)
@@ -393,9 +391,9 @@ bool rp6502_android_input_hook(const void* native_event)
         g_android_lt = (int)(lt_val * 255.0f);
         g_android_rt = (int)(rt_val * 255.0f);
 
-        pad_host_report(0, g_android_dpad, g_android_button0, g_android_button1,
-                        g_android_lx, g_android_ly, g_android_rx, g_android_ry,
-                        g_android_lt, g_android_rt, PAD_TYPE_UNKNOWN, true);
+        gamepad_host_report(0, g_android_dpad, g_android_button0, g_android_button1,
+                            g_android_lx, g_android_ly, g_android_rx, g_android_ry,
+                        g_android_lt, g_android_rt);
         return 1; // Handled
     }
     return 0; // Not handled
@@ -478,6 +476,7 @@ sapp_desc sokol_main(int argc, char* argv[])
     {
         g_android_menu_active = false;
         main_run(); // start the boot ROM
+        main_commit();
     }
     else
     {
@@ -486,8 +485,10 @@ sapp_desc sokol_main(int argc, char* argv[])
         android_scan_roms();
     }
 
-    // Connect gamepad player 0
-    pad_connect(0, true);
+    /* Connect gamepad player 0. Sticks unconditionally: the motion handler
+     * reads AXIS_X/Y/Z/RZ from whatever is attached, and Android never says
+     * whose labels these are. */
+    gamepad_connect(0, true, GAMEPAD_TYPE_UNKNOWN, true);
 
     // Seed the core's window/render state (also sets the vga framebuffer to
     // android_fb). Android opens at a fixed 640x480, so the computed size is unused.

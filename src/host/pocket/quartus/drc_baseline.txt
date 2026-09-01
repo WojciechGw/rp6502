@@ -1,6 +1,6 @@
 # What the Design Assistant finds today, and why each entry is still
 # here. Anything above these numbers fails the build; see
-# src/gen/drc_gate.py. Lower a line when a fix lands.
+# src/core/gen/drc_gate.py. Lower a line when a fix lands.
 #
 # Every count and every attribution below was read out of the report
 # rather than reasoned about. The D101 entry used to claim the opposite
@@ -88,7 +88,7 @@ R101 2
 #       from a bus.
 #
 #       SYNCHRONIZER_IDENTIFICATION does not move this number. It is set
-#       anyway, in platform/pocket/pocket.cmake: without it Quartus found all 78
+#       anyway, in the Pocket root: without it Quartus found all 78
 #       chains and discarded them, calculating no MTBF for the design at
 #       all. With it the tool identifies 476 chains, fails to rate 1.7%
 #       of them rather than 100%, and puts the design at 1e+09 years.

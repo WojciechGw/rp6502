@@ -64,7 +64,7 @@
             "type": "process",
             "command": "python3",
             "args": [
-                "${workspaceFolder}/src/vga/term/font.py"
+                "${workspaceFolder}/src/core/term/font.py"
             ],
             "presentation": {
                 "reveal": "always",
@@ -81,16 +81,35 @@
             "command": "cmake",
             "args": [
                 "--preset",
-                "debug"
+                "linux-debug"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/src/emu"
+                "cwd": "${workspaceFolder}/src/mach/emu"
             },
             "presentation": {
                 "reveal": "always",
                 "panel": "dedicated"
             },
-            "problemMatcher": []
+            "problemMatcher": [],
+            "linux": {
+                "args": [
+                    "--preset",
+                    "linux-debug"
+                ]
+            },
+            "osx": {
+                "args": [
+                    "--preset",
+                    "macos-debug"
+                ]
+            },
+            "windows": {
+                "command": "cmake",
+                "args": [
+                    "--preset",
+                    "windows-debug"
+                ]
+            }
         },
         {
             "label": "emu: Build (Debug)",
@@ -99,17 +118,39 @@
             "args": [
                 "--build",
                 "--preset",
-                "debug"
+                "linux-debug"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/src/emu"
+                "cwd": "${workspaceFolder}/src/mach/emu"
             },
             "dependsOn": "emu: Configure (Debug)",
             "presentation": {
                 "reveal": "always",
                 "panel": "dedicated"
             },
-            "problemMatcher": "$gcc"
+            "problemMatcher": "$gcc",
+            "linux": {
+                "args": [
+                    "--build",
+                    "--preset",
+                    "linux-debug"
+                ]
+            },
+            "osx": {
+                "args": [
+                    "--build",
+                    "--preset",
+                    "macos-debug"
+                ]
+            },
+            "windows": {
+                "command": "cmake",
+                "args": [
+                    "--build",
+                    "--preset",
+                    "windows-debug"
+                ]
+            }
         },
         {
             "label": "emu: Test",
@@ -117,7 +158,7 @@
             "command": "ctest",
             "args": [
                 "--test-dir",
-                "${workspaceFolder}/build/emulator/debug",
+                "${workspaceFolder}/build/emu/linux/debug",
                 "--output-on-failure"
             ],
             "dependsOn": "emu: Build (Debug)",
@@ -125,20 +166,112 @@
                 "reveal": "always",
                 "panel": "dedicated"
             },
-            "problemMatcher": "$gcc"
+            "problemMatcher": "$gcc",
+            "linux": {
+                "args": [
+                    "--test-dir",
+                    "${workspaceFolder}/build/emu/linux/debug",
+                    "--output-on-failure"
+                ]
+            },
+            "osx": {
+                "args": [
+                    "--test-dir",
+                    "${workspaceFolder}/build/emu/macos/debug",
+                    "--output-on-failure"
+                ]
+            },
+            "windows": {
+                "command": "ctest",
+                "args": [
+                    "--test-dir",
+                    "${workspaceFolder}/build/emu/windows/debug",
+                    "--output-on-failure"
+                ]
+            }
         },
         {
-            "label": "rtl: Firmware",
+            "label": "libretro: Configure (Debug)",
+            "type": "process",
+            "command": "cmake",
+            "args": [
+                "--preset",
+                "debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/src/mach/libretro"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "libretro: Build (Debug)",
             "type": "process",
             "command": "cmake",
             "args": [
                 "--build",
                 "--preset",
-                "Firmware"
+                "debug"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/src/rtl"
+                "cwd": "${workspaceFolder}/src/mach/libretro"
             },
+            "dependsOn": "libretro: Configure (Debug)",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "libretro: Test",
+            "type": "process",
+            "command": "ctest",
+            "args": [
+                "--test-dir",
+                "${workspaceFolder}/build/libretro/debug",
+                "--output-on-failure"
+            ],
+            "dependsOn": "libretro: Build (Debug)",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "rtl: Configure",
+            "type": "process",
+            "command": "cmake",
+            "args": [
+                "--preset",
+                "release"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/tests/rtl"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "rtl: Build",
+            "type": "process",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "--preset",
+                "release"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/tests/rtl"
+            },
+            "dependsOn": "rtl: Configure",
             "presentation": {
                 "reveal": "always",
                 "panel": "dedicated"
@@ -151,52 +284,17 @@
             "command": "ctest",
             "args": [
                 "--preset",
-                "verilator/Release"
+                "release"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/src/rtl"
+                "cwd": "${workspaceFolder}/tests/rtl"
             },
             "presentation": {
                 "reveal": "always",
                 "panel": "dedicated"
             },
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "rtl: Area and timing",
-            "type": "process",
-            "command": "cmake",
-            "args": [
-                "--build",
-                "--preset",
-                "Machine"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}/src/rtl"
-            },
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated"
-            },
-            "problemMatcher": []
-        },
-        {
-            "label": "pocket: Bitstream",
-            "type": "process",
-            "command": "cmake",
-            "args": [
-                "--build",
-                "--preset",
-                "Bitstream"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}/src/rtl"
-            },
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated"
-            },
-            "problemMatcher": []
+            "problemMatcher": "$gcc",
+            "dependsOn": "rtl: Build"
         },
         {
             "label": "pocket: Card package",
@@ -205,28 +303,10 @@
             "args": [
                 "--build",
                 "--preset",
-                "Card package"
+                "release"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/src/rtl"
-            },
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated"
-            },
-            "problemMatcher": []
-        },
-        {
-            "label": "pocket: Area and timing",
-            "type": "process",
-            "command": "cmake",
-            "args": [
-                "--build",
-                "--preset",
-                "Pocket core"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}/src/rtl"
+                "cwd": "${workspaceFolder}/src/mach/pocket"
             },
             "presentation": {
                 "reveal": "always",
