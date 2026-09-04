@@ -26,7 +26,7 @@
             "command": "${env:HOME}/.pico-sdk/picotool/2.3.0/picotool/picotool",
             "args": [
                 "load",
-                "${command:raspberry-pi-pico.launchTargetPath}",
+                "${command:cmake.launchTargetPath}",
                 "-fx"
             ],
             "presentation": {
@@ -52,7 +52,7 @@
                 "-f",
                 "target/${command:raspberry-pi-pico.getTarget}.cfg",
                 "-c",
-                "adapter speed 5000; program \"${command:raspberry-pi-pico.launchTargetPath}\" verify reset exit"
+                "adapter speed 5000; program \"${command:cmake.launchTargetPath}\" verify reset exit"
             ],
             "problemMatcher": [],
             "windows": {
@@ -84,7 +84,7 @@
                 "linux-debug"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/src/mach/emu"
+                "cwd": "${workspaceFolder}/src/host/sokol"
             },
             "presentation": {
                 "reveal": "always",
@@ -121,7 +121,7 @@
                 "linux-debug"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/src/mach/emu"
+                "cwd": "${workspaceFolder}/src/host/sokol"
             },
             "dependsOn": "emu: Configure (Debug)",
             "presentation": {
@@ -158,7 +158,7 @@
             "command": "ctest",
             "args": [
                 "--test-dir",
-                "${workspaceFolder}/build/emu/linux/debug",
+                "${workspaceFolder}/build/sokol/linux/debug",
                 "--output-on-failure"
             ],
             "dependsOn": "emu: Build (Debug)",
@@ -170,14 +170,14 @@
             "linux": {
                 "args": [
                     "--test-dir",
-                    "${workspaceFolder}/build/emu/linux/debug",
+                    "${workspaceFolder}/build/sokol/linux/debug",
                     "--output-on-failure"
                 ]
             },
             "osx": {
                 "args": [
                     "--test-dir",
-                    "${workspaceFolder}/build/emu/macos/debug",
+                    "${workspaceFolder}/build/sokol/macos/debug",
                     "--output-on-failure"
                 ]
             },
@@ -185,7 +185,7 @@
                 "command": "ctest",
                 "args": [
                     "--test-dir",
-                    "${workspaceFolder}/build/emu/windows/debug",
+                    "${workspaceFolder}/build/sokol/windows/debug",
                     "--output-on-failure"
                 ]
             }
@@ -199,7 +199,7 @@
                 "debug"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/src/mach/libretro"
+                "cwd": "${workspaceFolder}/src/host/libretro"
             },
             "presentation": {
                 "reveal": "always",
@@ -217,7 +217,7 @@
                 "debug"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/src/mach/libretro"
+                "cwd": "${workspaceFolder}/src/host/libretro"
             },
             "dependsOn": "libretro: Configure (Debug)",
             "presentation": {
@@ -306,7 +306,7 @@
                 "release"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/src/mach/pocket"
+                "cwd": "${workspaceFolder}/src/host/pocket"
             },
             "presentation": {
                 "reveal": "always",
