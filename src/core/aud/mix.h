@@ -45,6 +45,7 @@ typedef enum
     aud_dev_none = 0,
     aud_dev_psg,
     aud_dev_opl,
+    aud_dev_pcm,
 } aud_dev_t;
 
 void aud_setup(aud_dev_t dev);

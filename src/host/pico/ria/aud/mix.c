@@ -6,6 +6,7 @@
 
 #include "core/aud/mix.h"
 #include "core/aud/opl.h"
+#include "core/aud/pcm.h"
 #include "core/aud/psg.h"
 #include "core/aud/bel.h"
 #include "core/aud/sine.h"
@@ -51,6 +52,7 @@ static void __isr __time_critical_func(aud_irq)(void)
     {
     case aud_dev_psg: psg_sample(&l, &r); break;
     case aud_dev_opl: opl_stereo(&l, &r); break;
+    case aud_dev_pcm: pcm_sample(&l, &r); break;
     case aud_dev_none: break;
     }
     const int32_t bel = bel_sample();

@@ -9,6 +9,7 @@
 #include "core/aud/rsmp.h"
 #include "core/aud/opl.h"
 #include <stdatomic.h>
+#include "core/aud/pcm.h"
 #include "core/aud/psg.h"
 #include "core/aud/sine.h"
 #include "core/dap/dbg.h"
@@ -136,6 +137,7 @@ static void mix(int32_t *left, int32_t *right)
         {
         case aud_dev_psg: psg_sample(&l, &r); break;
         case aud_dev_opl: opl_stereo(&l, &r); break;
+        case aud_dev_pcm: pcm_sample(&l, &r); break;
         case aud_dev_none: break;
         }
     const int32_t bel = bel_sample();
@@ -270,7 +272,7 @@ bool aud_sst_load(sst_cursor_t *c, unsigned flags)
     uint8_t n = sst_get_u8(c), at = sst_get_u8(c);
     int16_t last_l = (int16_t)sst_get_u16(c);
     int16_t last_r = (int16_t)sst_get_u16(c);
-    if (!sst_ok(c) || dev > aud_dev_opl || n > 8 || at > n)
+    if (!sst_ok(c) || dev > aud_dev_pcm || n > 8 || at > n)
         return false;
 
     aud_dev = (aud_dev_t)dev;

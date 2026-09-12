@@ -146,6 +146,6 @@ bool pcm_xreg(uint16_t word)
     pcm_phase_inc = (uint32_t)(((uint64_t)rate << 16) / AUD_NATIVE_RATE);
     xram_queue_page = word >> 8;
     xram_queue_tail = xram_queue_head;
-    aud_setup(pcm_sample);
+    aud_setup(aud_dev_pcm);
     return true;
 }
