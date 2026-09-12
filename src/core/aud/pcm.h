@@ -13,6 +13,7 @@
  * program's chosen rate up to AUD_NATIVE_RATE.
  */
 
+#include "core/sys/sst.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -21,5 +22,13 @@
 void pcm_sample(int16_t *left, int16_t *right);
 
 bool pcm_xreg(uint16_t word);
+
+/* base, mask, format, frame_sz, read_ptr, l0/r0/l1/r1, phase, phase_inc. */
+#define PCM_SST_SIZE (2 + 2 + 1 + 1 + 2 + 4 * 2 + 4 + 4)
+void pcm_sst_save(sst_cursor_t *c, unsigned flags);
+bool pcm_sst_load(sst_cursor_t *c, unsigned flags);
+
+#define PCM_DRIVER DRIVER(nul_init, nul_task, nul_task, nul_run, nul_stop, nul_break, \
+    nul_config, nul_config, SST(PCM_, 1, PCM_SST_SIZE, pcm_sst_save, pcm_sst_load))
 
 #endif /* _CORE_AUD_PCM_H_ */

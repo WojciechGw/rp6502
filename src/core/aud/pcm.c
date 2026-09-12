@@ -120,6 +120,67 @@ void pcm_sample(int16_t *left, int16_t *right)
     *right = (int16_t)(pcm_r0 + (((int32_t)(pcm_r1 - pcm_r0) * t) >> 16));
 }
 
+void pcm_sst_save(sst_cursor_t *c, unsigned flags)
+{
+    (void)flags;
+    sst_put_u16(c, pcm_base);
+    sst_put_u16(c, pcm_buf_mask);
+    sst_put_u8(c, pcm_format);
+    sst_put_u8(c, pcm_frame_sz);
+    sst_put_u16(c, pcm_read_ptr);
+    sst_put_i16(c, pcm_l0);
+    sst_put_i16(c, pcm_r0);
+    sst_put_i16(c, pcm_l1);
+    sst_put_i16(c, pcm_r1);
+    sst_put_u32(c, pcm_phase);
+    sst_put_u32(c, pcm_phase_inc);
+}
+
+bool pcm_sst_load(sst_cursor_t *c, unsigned flags)
+{
+    (void)flags;
+    uint16_t base = sst_get_u16(c);
+    uint16_t mask = sst_get_u16(c);
+    uint8_t fmt = sst_get_u8(c);
+    uint8_t fsz = sst_get_u8(c);
+    uint16_t read_ptr = sst_get_u16(c);
+    int16_t l0 = sst_get_i16(c);
+    int16_t r0 = sst_get_i16(c);
+    int16_t l1 = sst_get_i16(c);
+    int16_t r1 = sst_get_i16(c);
+    uint32_t phase = sst_get_u32(c);
+    uint32_t phase_inc = sst_get_u32(c);
+
+    /* pcm_sample indexes &xram[pcm_base+8] by pcm_read_ptr and pcm_frame_sz
+     * every call, unconditionally once this device is selected, so a
+     * restored state has to pass the same shape a fresh pcm_xreg would
+     * leave it in: the ring a power of two that fits inside XRAM, frame_sz
+     * one of the three real sizes (or 0, the reset value pcm_xreg never
+     * writes, for a PCM that has never been armed), and read_ptr on a frame
+     * boundary inside the ring. Zero fields all round -- what pcm_xreg's
+     * static storage starts as -- pass this the same way 0 passes psg_xreg's
+     * checks: the trivial case is also a valid one. */
+    if (!sst_ok(c) ||
+        (mask & (mask + 1u)) ||
+        (uint32_t)base + 8 + (mask + 1u) > 65536 ||
+        (fsz != 0 && fsz != 1 && fsz != 2 && fsz != 4) ||
+        read_ptr > mask || (fsz && (read_ptr % fsz)))
+        return false;
+
+    pcm_base = base;
+    pcm_buf_mask = mask;
+    pcm_format = fmt;
+    pcm_frame_sz = fsz;
+    pcm_read_ptr = read_ptr;
+    pcm_l0 = l0;
+    pcm_r0 = r0;
+    pcm_l1 = l1;
+    pcm_r1 = r1;
+    pcm_phase = phase;
+    pcm_phase_inc = phase_inc;
+    return true;
+}
+
 bool pcm_xreg(uint16_t word)
 {
     if (word & 0x0003)
