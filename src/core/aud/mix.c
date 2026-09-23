@@ -14,6 +14,7 @@
 #include "core/aud/sine.h"
 #include "core/dap/dbg.h"
 #include "core/sys/ria.h"
+#include "core/sys/sys.h"
 #include <string.h>
 
 /* What the sink runs at until it says otherwise. libretro declares 48000 to
@@ -206,7 +207,7 @@ int aud_render(float *dst, int samples)
         memset(dst, 0, (size_t)samples * 2 * sizeof *dst);
         return 0;
     }
-    if (dbg_is_stopped())
+    if (dbg_is_stopped() && sys_running())
     {
         for (int i = 0; i < samples; i++)
         {
