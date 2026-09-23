@@ -109,11 +109,6 @@ void pcm_sample(int16_t *left, int16_t *right)
         }
         xram[base + 6] = (uint8_t)pcm_read_ptr;
         xram[base + 7] = (uint8_t)(pcm_read_ptr >> 8);
-
-        // Drain xram_queue; write_ptr is read directly from xram, queue values unused
-        uint8_t max_work = 32;
-        while (max_work-- && xram_queue_tail != xram_queue_head)
-            xram_queue_tail++;
     }
     int32_t t = (int32_t)pcm_phase;
     *left  = (int16_t)(pcm_l0 + (((int32_t)(pcm_l1 - pcm_l0) * t) >> 16));
@@ -205,8 +200,6 @@ bool pcm_xreg(uint16_t word)
     pcm_l0 = pcm_r0 = pcm_l1 = pcm_r1 = 0;
     pcm_phase     = 0;
     pcm_phase_inc = (uint32_t)(((uint64_t)rate << 16) / AUD_NATIVE_RATE);
-    xram_queue_page = word >> 8;
-    xram_queue_tail = xram_queue_head;
     aud_setup(aud_dev_pcm);
     return true;
 }
