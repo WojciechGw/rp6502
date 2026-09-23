@@ -132,6 +132,7 @@ void aud_xram_write(uint16_t addr, uint8_t val)
     {
     case aud_dev_psg: psg_xram_write((uint8_t)addr, val); break;
     case aud_dev_opl: opl_xram_write((uint8_t)addr, val); break;
+    case aud_dev_pcm: break;
     case aud_dev_none: break;
     }
     aud_engine_unlock();

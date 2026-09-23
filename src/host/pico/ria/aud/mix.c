@@ -40,6 +40,7 @@ static void aud_drain(void)
         {
         case aud_dev_psg: psg_xram_write(loc, val); break;
         case aud_dev_opl: opl_xram_write(loc, val); break;
+        case aud_dev_pcm: break;
         case aud_dev_none: break;
         }
 }
