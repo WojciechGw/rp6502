@@ -84,7 +84,7 @@ rp6502_test_rom(pcm_opl_rom GEN ${RP6502_TESTS_DIR}/gen/pcm_opl_rom_gen.py
     ARGS --emit ${PCM_OPL_ROM}
     OUTPUTS ${PCM_OPL_ROM}
     DEPENDS ${RP6502_ROM_GEN}
-    COMMENT "Generating the PCM and OPL2 demo ROM")
+    COMMENT "Generating the PCM with OPL2/PSG demo ROM")
 
 set(STREAM_ROM ${RP6502_TEST_ROM_DIR}/stream.rp6502)
 rp6502_test_rom(stream_rom GEN ${RP6502_TESTS_DIR}/gen/stream_rom_gen.py
