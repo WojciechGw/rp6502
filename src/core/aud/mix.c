@@ -81,10 +81,20 @@ void aud_init(void)
     aud_probe = NULL;
 }
 
-void aud_stop(void)
+void aud_release(void)
 {
     aud_dev = aud_dev_none;
     ria_aud_watch(0xFFFF);
+}
+
+/* PCM goes with the program, since its ring is in XRAM the next one will
+ * write over. */
+void aud_stop(void)
+{
+    aud_release();
+    aud_engine_lock();
+    pcm_stop();
+    aud_engine_unlock();
 }
 
 /* For a host that unloads the library rather than ending the process. The
@@ -95,6 +105,7 @@ void aud_shutdown(void)
     aud_dev = aud_dev_none;
     ria_aud_watch(0xFFFF);
     aud_probe = NULL;
+    pcm_stop();
     opl_shutdown();
 }
 
@@ -132,7 +143,6 @@ void aud_xram_write(uint16_t addr, uint8_t val)
     {
     case aud_dev_psg: psg_xram_write((uint8_t)addr, val); break;
     case aud_dev_opl: opl_xram_write((uint8_t)addr, val); break;
-    case aud_dev_pcm: break;
     case aud_dev_none: break;
     }
     aud_engine_unlock();
@@ -159,23 +169,25 @@ static inline float to_f(int32_t v)
  * wiring.sv clamps the audio sum in the fabric. */
 static void mix(int32_t *left, int32_t *right)
 {
-    int16_t l = 0, r = 0;
+    int16_t l = 0, r = 0, pl = 0, pr = 0;
     aud_engine_lock();
     if (aud_probe)
         aud_probe(&l, &r);
     else
+    {
         switch (aud_dev)
         {
         case aud_dev_psg: psg_sample(&l, &r); break;
         case aud_dev_opl: opl_stereo(&l, &r); break;
-        case aud_dev_pcm: pcm_sample(&l, &r); break;
         case aud_dev_none: break;
         }
+        pcm_sample(&pl, &pr);
+    }
     aud_engine_unlock();
     /* The bell is outside the lock: nothing programs it through XRAM. */
     const int32_t bel = bel_sample();
-    int32_t sl = l + bel;
-    int32_t sr = r + bel;
+    int32_t sl = l + pl + bel;
+    int32_t sr = r + pr + bel;
     if (sl < AUD_SAMPLE_MIN)
         sl = AUD_SAMPLE_MIN;
     if (sl > AUD_SAMPLE_MAX)
@@ -305,7 +317,7 @@ bool aud_sst_load(sst_cursor_t *c, unsigned flags)
     uint8_t n = sst_get_u8(c), at = sst_get_u8(c);
     int16_t last_l = (int16_t)sst_get_u16(c);
     int16_t last_r = (int16_t)sst_get_u16(c);
-    if (!sst_ok(c) || dev > aud_dev_pcm || n > 8 || at > n)
+    if (!sst_ok(c) || dev > aud_dev_opl || n > 8 || at > n)
         return false;
 
     aud_dev = (aud_dev_t)dev;

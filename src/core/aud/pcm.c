@@ -65,6 +65,14 @@ static uint32_t pcm_phase_inc;
 
 void pcm_sample(int16_t *left, int16_t *right)
 {
+    /* The mixers call this every sample whatever else is sounding, and an
+     * unarmed PCM's base of 0 would otherwise have read_ptr written over
+     * XRAM's first bytes. */
+    if (!pcm_frame_sz)
+    {
+        *left = *right = 0;
+        return;
+    }
     pcm_phase += pcm_phase_inc;
     while (pcm_phase >= (1u << 16))
     {
@@ -176,10 +184,26 @@ bool pcm_sst_load(sst_cursor_t *c, unsigned flags)
     return true;
 }
 
+void pcm_stop(void)
+{
+    pcm_frame_sz = 0;
+    pcm_l0 = pcm_r0 = pcm_l1 = pcm_r1 = 0;
+    pcm_phase = 0;
+}
+
 bool pcm_xreg(uint16_t word)
 {
+    /* PCM is summed with whichever of the PSG and the OPL is sounding, so
+     * taking or giving it up leaves that engine alone. The whole change is
+     * behind the engine lock because pcm_sample reads base and mask as a
+     * pair, and a new mask against the old base can run past XRAM. */
+    aud_engine_lock();
     if (word & 0x0003)
+    {
+        pcm_stop();
+        aud_engine_unlock();
         return word == 0xFFFF;
+    }
     uint8_t log2 = xram[word + 3];
     if (log2 < PCM_BUF_LOG2_MIN || log2 > PCM_BUF_LOG2_MAX)
         log2 = PCM_BUF_LOG2_DEF;
@@ -191,7 +215,11 @@ bool pcm_xreg(uint16_t word)
     uint8_t fsz = (fmt & 2) ? ((fmt & 1) ? 1 : 2)
                              : ((fmt & 1) ? 2 : 4);
     if ((uint32_t)word + 8 + (1u << log2) > 65536)
+    {
+        pcm_stop();
+        aud_engine_unlock();
         return false;
+    }
     pcm_buf_mask  = (uint16_t)((1u << log2) - 1);
     pcm_format    = fmt;
     pcm_frame_sz  = fsz;
@@ -200,6 +228,6 @@ bool pcm_xreg(uint16_t word)
     pcm_l0 = pcm_r0 = pcm_l1 = pcm_r1 = 0;
     pcm_phase     = 0;
     pcm_phase_inc = (uint32_t)(((uint64_t)rate << 16) / AUD_NATIVE_RATE);
-    aud_setup(aud_dev_pcm);
+    aud_engine_unlock();
     return true;
 }

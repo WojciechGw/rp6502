@@ -10,7 +10,8 @@
 #define _CORE_AUD_PCM_H_
 
 /* PCM audio playback - stereo ring buffer in XRAM, resampled from a
- * program's chosen rate up to AUD_NATIVE_RATE.
+ * program's chosen rate up to AUD_NATIVE_RATE. It is not an aud_dev: every
+ * mixer adds it to the PSG or the OPL, and 0xFFFF in its xreg stops it.
  */
 
 #include "core/sys/sst.h"
@@ -18,10 +19,14 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* One stereo sample at AUD_NATIVE_RATE, and the engine advanced by one. */
+/* One stereo sample at AUD_NATIVE_RATE, and the engine advanced by one.
+ * Silence while stopped. */
 void pcm_sample(int16_t *left, int16_t *right);
 
 bool pcm_xreg(uint16_t word);
+
+/* The caller holds the engine lock, or nothing samples concurrently. */
+void pcm_stop(void);
 
 /* base, mask, format, frame_sz, read_ptr, l0/r0/l1/r1, phase, phase_inc. */
 #define PCM_SST_SIZE (2 + 2 + 1 + 1 + 2 + 4 * 2 + 4 + 4)
