@@ -437,7 +437,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--emit", required=True)
     a = ap.parse_args()
-    print(f"pcm_opl.rp6502 {rom().write(a.emit)} bytes")
+    print(f"pcm+opl_or_psg.rp6502 {rom().write(a.emit)} bytes")
     return 0
 
 
