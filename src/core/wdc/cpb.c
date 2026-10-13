@@ -255,6 +255,12 @@ void cpb_resb(bool low)
         sram[CPB_REG_RESETS] = ++cpb_resets;
 }
 
+void cpb_power_on(void)
+{
+    cpb_resets = 0;
+    cpb_resb_low = false;
+}
+
 /* The module republishes its temperature once a second, which puts back what
  * a program wrote over it. */
 void cpb_task(void)

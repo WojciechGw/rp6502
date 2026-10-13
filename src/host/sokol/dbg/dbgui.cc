@@ -302,6 +302,27 @@ static void draw_control(void)
             dbg_request_pause();
 
         ImGui::Separator();
+        ImGui::BeginDisabled(!app_has_boot());
+        if (ImGui::Button("Reset (warm)"))
+            app_reset(false);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("RESB, then the program from the command line again,\n"
+                              "over RAM as it is");
+        ImGui::SameLine();
+        if (ImGui::Button("Reset (cold)"))
+            app_reset(true);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("A power cycle: RAM and XRAM filled again, then the\n"
+                              "program from the command line");
+        ImGui::SameLine();
+        if (ImGui::Button("Break"))
+            app_break();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Stop the program and go back to its launcher, or\n"
+                              "without one start the program from the command line again");
+        ImGui::EndDisabled();
+
+        ImGui::Separator();
         static char bpbuf[8] = "";
         ImGui::SetNextItemWidth(80);
         ImGui::InputText("hex", bpbuf, sizeof bpbuf, ImGuiInputTextFlags_CharsHexadecimal);

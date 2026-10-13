@@ -34,6 +34,9 @@
 #include "core/aud/mix.h"
 #include "core/dap/dbg.h"
 #include "core/sys/proc.h"
+#include "core/api/api.h"
+#include "core/api/proc.h"
+#include "core/wdc/cpb.h"
 #include "core/sys/com.h"
 #include "core/str/oem.h"
 #include "core/hid/vtkeys.h"
@@ -377,6 +380,8 @@ bool app_boot_rom(const char *path)
     }
     vtkeys_paste_cancel(); /* the new program must not receive the old one's paste */
     bool ok = proc_boot(rom, 0, NULL, PROC_UNCHAIN);
+    if (ok)
+        app_set_boot(rom, 0, NULL);
     /* The install from the previous drop is removed once proc_boot has
      * stopped the machine, whether or not this boot succeeded, unless this
      * drop installed a ROM of the same name, which replaced it. */
@@ -394,6 +399,81 @@ bool app_boot_rom(const char *path)
      * carries the request out itself. */
     sys_commit();
     return true;
+}
+
+static struct
+{
+    char *rom;
+    int argc;
+    char **args;
+} app_boot;
+
+void app_set_boot(const char *rom, int argc, char *const *args)
+{
+    for (int i = 0; i < app_boot.argc; i++)
+        free(app_boot.args[i]);
+    free(app_boot.args);
+    free(app_boot.rom);
+    app_boot.argc = 0;
+    app_boot.args = argc > 0 ? calloc((size_t)argc, sizeof *app_boot.args) : NULL;
+    app_boot.rom = strdup(rom);
+    if (!app_boot.rom || (argc > 0 && !app_boot.args))
+        return;
+    for (int i = 0; i < argc; i++)
+        if ((app_boot.args[i] = strdup(args[i])))
+            app_boot.argc++;
+}
+
+bool app_has_boot(void)
+{
+#ifdef EMU_WITH_DEBUGGER
+    if (dap_is_active())
+        return false;
+#endif
+    return app_boot.rom != NULL;
+}
+
+/* A machine the debugger holds would stay held through the new program's
+ * first instruction, so it is let go first. */
+static bool app_boot_again(unsigned flags)
+{
+    if (!app_has_boot())
+        return false;
+    if (dbg_is_stopped())
+        dbg_continue();
+    vtkeys_paste_cancel();
+    if (!proc_boot(app_boot.rom, app_boot.argc, app_boot.args, PROC_UNCHAIN | flags))
+        return false;
+    sys_commit();
+    return true;
+}
+
+/* A cold start is the CPB's power-on too, which counts resets from zero; the
+ * stop inside proc_boot then counts this one. */
+bool app_reset(bool cold)
+{
+    if (cold && app_has_boot())
+        cpb_power_on();
+    return app_boot_again(cold ? PROC_REFILL : 0);
+}
+
+/* What Alt-F4 does on the Pico: a stop as exit() makes one, so proc_stop
+ * queues the launcher. */
+bool app_break(void)
+{
+    if (!app_has_boot())
+        return false;
+    if (sys_running() && proc_has_launcher() && !proc_is_launcher())
+    {
+        if (dbg_is_stopped())
+            dbg_continue();
+        vtkeys_paste_cancel();
+        api_set_ax(0xFFFF);
+        sys_stop();
+        sys_commit();
+        return true;
+    }
+    return app_boot_again(0);
 }
 
 void app_input(const struct sapp_event *e)
