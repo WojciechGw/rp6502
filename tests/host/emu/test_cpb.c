@@ -334,6 +334,31 @@ UTEST(cpb, a_savestate_that_aliases_block_31_is_refused)
     ASSERT_FALSE(cpb_sst_load(&c, 0));
 }
 
+UTEST(cpb, the_debugger_sees_the_state)
+{
+    fresh(0);
+    knock('+');
+    wr(CPB_REG_EDIT, 2);
+    map(16, 100);
+    wr(CPB_REG_SWITCH, 2);
+    wr(SLOT16, 0xAA);
+    for (const char *p = "#!RP"; *p; p++)
+        wr(CPB_REG_KNOCK, (uint8_t)*p);
+
+    cpb_dbg_t st;
+    cpb_dbg_get(&st);
+    ASSERT_TRUE(st.gate);
+    ASSERT_EQ(st.active_task, 2);
+    ASSERT_EQ(st.edit_task, 2);
+    ASSERT_EQ(st.knock_pos, 4);
+    ASSERT_EQ(st.temp, 50);
+    ASSERT_EQ(st.active_map[16], 100);
+    ASSERT_EQ(st.task_map[2][16], 100);
+    ASSERT_EQ(st.task_map[0][16], 16);
+    ASSERT_EQ(cpb_dbg_block(100)[0], 0xAA);
+    ASSERT_TRUE(cpb_dbg_block(16) == &sram[SLOT16]);
+}
+
 UTEST(cpb, off_is_the_plain_machine)
 {
     fresh(0);

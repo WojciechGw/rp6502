@@ -268,6 +268,25 @@ void cpb_task(void)
     }
 }
 
+void cpb_dbg_get(cpb_dbg_t *out)
+{
+    out->gate = cpb_gate;
+    out->active_task = cpb_active_task;
+    out->edit_task = cpb_edit_task;
+    out->knock_pos = cpb_knock_pos;
+    out->resets = cpb_resets;
+    out->temp = cpb_temp;
+    out->delay = cpb_delay;
+    out->queued = cpb_queue_count;
+    memcpy(out->active_map, cpb_active_map, sizeof out->active_map);
+    memcpy(out->task_map, cpb_task_map, sizeof out->task_map);
+}
+
+const uint8_t *cpb_dbg_block(uint8_t block)
+{
+    return cpb_block(block);
+}
+
 void cpb_sst_save(sst_cursor_t *c, unsigned flags)
 {
     (void)flags;

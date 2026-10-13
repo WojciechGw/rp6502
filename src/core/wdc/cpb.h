@@ -59,6 +59,19 @@ void cpb_resb(bool low);
 
 void cpb_task(void);
 
+/* What the debugger window shows. Nothing here changes the module. */
+typedef struct
+{
+    bool gate;
+    uint8_t active_task, edit_task, knock_pos, resets, temp;
+    uint32_t delay;
+    uint16_t queued;
+    uint8_t active_map[CPB_SLOTS];
+    uint8_t task_map[CPB_TASKS][CPB_SLOTS];
+} cpb_dbg_t;
+void cpb_dbg_get(cpb_dbg_t *out);
+const uint8_t *cpb_dbg_block(uint8_t block);
+
 #define CPB_SST_SIZE ((CPB_BLOCKS - CPB_SLOTS) * CPB_BLOCK_SIZE + CPB_SLOTS + \
                       CPB_TASKS * CPB_SLOTS + 6 + 8 + 3 + CPB_QUEUE_LEN * 7)
 void cpb_sst_save(sst_cursor_t *c, unsigned flags);
