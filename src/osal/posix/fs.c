@@ -255,6 +255,12 @@ char *fs_host_realpath(const char *host)
     return realpath(host, NULL);
 }
 
+bool fs_host_is_dir(const char *host)
+{
+    struct stat st;
+    return stat(host, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
 /* Moved to the top of the descriptor space, which open() uses only once every
  * lower number is in use, so the ROM image does not take the low numbers that
  * a program's files get. Nothing is recorded for a savestate, because

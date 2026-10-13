@@ -214,12 +214,12 @@ static void tex_destroy(ui_texture_t h)
  * ack, RW auto-increment) that a debugger view must never trigger. */
 static uint8_t mem_peek(uint16_t addr)
 {
-    return sram[addr];
+    return *sram_view(addr);
 }
 
 static void mem_poke(uint16_t addr, uint8_t data)
 {
-    sram[addr] = data;
+    *sram_view(addr) = data;
 }
 
 /* ui_dbg memory read callback (the disassembler + heatmap). */

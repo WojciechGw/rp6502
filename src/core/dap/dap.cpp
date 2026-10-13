@@ -159,7 +159,7 @@ void rebuild_bp_meta()
 
 /* Read a byte of 6502 memory — the callback the variable resolvers use to fetch
  * the live frame base (soft / C stack pointer). Only called while stopped. */
-uint8_t dap_readmem(uint16_t a) { return sram[a]; }
+uint8_t dap_readmem(uint16_t a) { return *sram_view(a); }
 
 bool src_addr_to_line(uint16_t addr, const char **file, int *line)
 {
@@ -469,7 +469,7 @@ struct DasmCtx
 uint8_t dasm_in(void *u)
 {
     DasmCtx *c = (DasmCtx *)u;
-    uint8_t b = sram[c->pc++];
+    uint8_t b = *sram_view(c->pc++);
     char h[4];
     snprintf(h, sizeof h, "%02X ", b);
     c->bytes += h;
@@ -552,9 +552,9 @@ FrameCtx frame_ctx(int64_t frameId)
 bool stack_return_target(uint16_t pushed, uint16_t *target_out)
 {
     uint16_t jsr = (uint16_t)(pushed - 2);
-    if (sram[jsr] != 0x20)
+    if (*sram_view(jsr) != 0x20)
         return false;
-    uint16_t target = (uint16_t)(sram[(uint16_t)(jsr + 1)] | (sram[(uint16_t)(jsr + 2)] << 8));
+    uint16_t target = (uint16_t)(*sram_view((uint16_t)(jsr + 1)) | (*sram_view((uint16_t)(jsr + 2)) << 8));
     const char *fn = src_addr_to_func(target);
     uint16_t entry;
     if (!fn || !src_func_addr(fn, &entry) || entry != target)
@@ -581,7 +581,7 @@ void unwind_stack()
         for (int skip = 0; skip <= UNWIND_SCAN_MAX; skip++)
         {
             uint8_t lo_s = (uint8_t)(sp + 1 + skip), hi_s = (uint8_t)(sp + 2 + skip);
-            uint16_t pushed = (uint16_t)(sram[0x100 + lo_s] | (sram[0x100 + hi_s] << 8));
+            uint16_t pushed = (uint16_t)(*sram_view((uint16_t)(0x100 + lo_s)) | (*sram_view((uint16_t)(0x100 + hi_s)) << 8));
             if (!stack_return_target(pushed, nullptr))
                 continue;
             g_frames.push_back({pushed, (uint16_t)(pushed + 1)});
@@ -660,7 +660,7 @@ uint64_t mem_le(uint16_t addr, int n)
 {
     uint64_t v = 0;
     for (int i = 0; i < n && i < 8; i++)
-        v |= (uint64_t)sram[(uint16_t)(addr + i)] << (8 * i);
+        v |= (uint64_t)*sram_view((uint16_t)(addr + i)) << (8 * i);
     return v;
 }
 
@@ -695,7 +695,7 @@ std::string str_repr(uint16_t addr, int max)
     std::string s = "\"";
     for (int i = 0; i < max; i++)
     {
-        uint8_t c = sram[(uint16_t)(addr + i)];
+        uint8_t c = *sram_view((uint16_t)(addr + i));
         if (!c) break;
         if (c == '"' || c == '\\') { s += '\\'; s += (char)c; }
         else if (c >= 0x20 && c < 0x7f) s += (char)c;
@@ -939,7 +939,7 @@ void store_scalar(uint16_t addr, int sz, int64_t value)
 {
     if (sz <= 0 || sz > 8) sz = 2;
     for (int i = 0; i < sz; i++)
-        sram[(uint16_t)(addr + i)] = (uint8_t)((uint64_t)value >> (8 * i));
+        *sram_view((uint16_t)(addr + i)) = (uint8_t)((uint64_t)value >> (8 * i));
 }
 
 bool resolve_ident(const std::string &name, const FrameCtx &fc, EvalResult &r)
@@ -1956,7 +1956,7 @@ extern "C" void dap_start(void)
         for (long i = 0; i < count; i++)
         {
             long a = base + i;
-            buf.push_back((a >= 0 && a <= 0xFFFF) ? sram[a] : 0);
+            buf.push_back((a >= 0 && a <= 0xFFFF) ? *sram_view((uint16_t)a) : 0);
         }
         r.address = hex16((uint16_t)(base & 0xFFFF));
         if (!buf.empty())
@@ -2166,7 +2166,7 @@ extern "C" void dap_start(void)
         {
             long a = base + (long)i;
             if (a < 0 || a > 0xFFFF) break;
-            sram[a] = bytes[i];
+            *sram_view((uint16_t)a) = bytes[i];
             written++;
         }
         r.bytesWritten = written;

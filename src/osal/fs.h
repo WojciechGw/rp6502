@@ -55,6 +55,7 @@ bool fs_rom_remove(const char *name, api_errno *err);
  * same descriptor space. */
 char *fs_host_realpath(const char *host);
 int fs_rom_open_host(const char *host, api_errno *err);
+bool fs_host_is_dir(const char *host);
 
 /* fs_save_start sets the SAVE: folder each time a program starts: the
  * host_save_dir of host/host.h, or the working directory at that moment when

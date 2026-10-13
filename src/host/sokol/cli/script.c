@@ -24,6 +24,7 @@
 #include "core/wdc/sram.h"
 #include "core/sys/xram.h"
 #include "core/vga/vga_emu.h"
+#include "osal/dir.h"
 #include "osal/os.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -323,6 +324,11 @@ static bool script_address(char **p, uint8_t **base, long *addr)
         return false;
     *addr = value;
     return true;
+}
+
+static uint8_t *script_byte(uint8_t *base, long addr)
+{
+    return base == sram ? sram_view((uint16_t)addr) : &base[addr];
 }
 
 static void script_gamepad_publish(int player)
@@ -886,9 +892,9 @@ bool script_command(const char *line)
                 return script_error("peek wants byte values 0..255");
             if (addr + i > 0xFFFF)
                 return script_error("peek runs past the end of memory");
-            if (base[addr + i] != (uint8_t)want)
+            if (*script_byte(base, addr + i) != (uint8_t)want)
                 return script_error("$%04lX+%d is $%02X, expected $%02lX",
-                                    addr, i, base[addr + i], want);
+                                    addr, i, *script_byte(base, addr + i), want);
             i++;
         }
         if (!i)
@@ -896,10 +902,10 @@ bool script_command(const char *line)
         return true;
     }
 
-    /* Writes land in sram[] or xram[] directly. sram_tick stores any address
-     * but answers a read only at or below SRAM_MMAP_HI ($FEFF), so a poke
-     * above that changes nothing the program can read, and it reaches no
-     * device either because it never goes on the bus. */
+    /* Writes land in the 6502's view of RAM or in xram[] directly. sram_tick
+     * stores any address but answers a read only at or below SRAM_MMAP_HI
+     * ($FEFF), so a poke above that changes nothing the program can read, and
+     * it reaches no device either because it never goes on the bus. */
     if (!strcasecmp(cmd, "poke"))
     {
         uint8_t *base;
@@ -913,7 +919,7 @@ bool script_command(const char *line)
                 return script_error("poke wants byte values 0..255");
             if (addr + i > 0xFFFF)
                 return script_error("poke runs past the end of memory");
-            base[addr + i] = (uint8_t)value;
+            *script_byte(base, addr + i) = (uint8_t)value;
             i++;
         }
         if (!i)
@@ -944,7 +950,7 @@ bool script_command(const char *line)
         if (script_replies)
             printf("ok");
         for (long i = 0; i < count && addr + i <= 0xFFFF; i++)
-            printf("%s%02X", i || script_replies ? " " : "", base[addr + i]);
+            printf("%s%02X", i || script_replies ? " " : "", *script_byte(base, addr + i));
         printf("\n");
         fflush(stdout);
         script_answered = script_replies;
@@ -1056,7 +1062,14 @@ bool script_command(const char *line)
         char path[SCRIPT_LINE_MAX];
         if (!script_string(&p, path, sizeof path) || !path[0])
             return script_error("load wants a quoted path");
-        oem_from_utf8(path, path, sizeof path);
+        /* A host file goes by its absolute name, which the drive the program
+         * is on cannot move; anything else, such as ":NAME", as written. */
+        char *abs = os_dir_from_host(path);
+        if (abs && strlen(abs) < sizeof path)
+            strcpy(path, abs);
+        else
+            oem_from_utf8(path, path, sizeof path);
+        free(abs);
         /* A running program would have its memory written out from under it,
          * so a load happens only between programs. */
         if (sys_active())
@@ -1122,13 +1135,13 @@ static bool script_settle(void)
         script_show_capture();
         return script_error("timed out waiting for \"%s\"", script_needle);
     case SCRIPT_BYTE:
-        if (script_addr_base[script_addr] == script_addr_want)
+        if (*script_byte(script_addr_base, script_addr) == script_addr_want)
             break;
         if (script_spend())
             return false;
         return script_error("timed out waiting for %s:$%04lX to read $%02X; it is $%02X",
                             script_addr_base == xram ? "xram" : "ram", script_addr,
-                         script_addr_want, script_addr_base[script_addr]);
+                         script_addr_want, *script_byte(script_addr_base, script_addr));
     case SCRIPT_TYPING:
         if (!vtkeys_paste_busy())
             break;

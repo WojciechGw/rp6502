@@ -319,25 +319,16 @@ void app_frame(void)
     gfx_end_pass();
 }
 
+/* The ROM is named by its absolute path, so a program that has moved to
+ * another drive, a mapped one included, cannot change which file it is. A
+ * name FAT refuses, or an absolute path longer than API_PATH_MAX, has no
+ * drive path and is installed instead. */
 char *app_rom_path(const char *host)
 {
-    if (oem_maps_utf8(host))
-    {
-        /* oem_from_utf8 writes one byte per UTF-8 sequence, so the UTF-8
-         * length holds the result. A name FAT refuses has no drive path
-         * either, and os_dir_realpath returns NULL for it. So does a path
-         * whose absolute form is longer than API_PATH_MAX. */
-        size_t sz = strlen(host) + 1;
-        char *oem = malloc(sz);
-        if (oem)
-            oem_from_utf8(host, oem, sz);
-        char *abs = oem ? os_dir_realpath(oem) : NULL;
-        bool named = abs && strlen(abs) <= API_PATH_MAX;
-        free(abs);
-        if (named)
-            return oem;
-        free(oem);
-    }
+    char *abs = os_dir_from_host(host);
+    if (abs && strlen(abs) <= API_PATH_MAX)
+        return abs;
+    free(abs);
     const char *name = rom_alias_insert(host);
     char *rom = name ? malloc(strlen(name) + 2) : NULL;
     if (rom)

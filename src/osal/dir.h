@@ -74,6 +74,11 @@ void oem_fs_code_page(uint16_t cp);
 
 char *os_dir_realpath(const char *path);
 
+/* The absolute name a program knows an existing host file or folder by, a
+ * relative path taken from the host's working directory, or NULL when there
+ * is none or no program could name it. */
+char *os_dir_from_host(const char *host);
+
 /* A copy of a path that stays valid until os_dir_path_drop. A board with no
  * heap answers from static buffers and returns NULL for a path that will not
  * fit one. */

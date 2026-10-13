@@ -28,6 +28,10 @@ void sram_init(void);
 /* data is in and out. */
 void sram_tick(uint16_t addr, bool read, uint8_t *data);
 
+/* The byte the 6502 sees at addr, for views and pokes that bypass the bus.
+ * It is sram[addr] unless a CPB has the slot mapped elsewhere. */
+uint8_t *sram_view(uint16_t addr);
+
 #define SRAM_SST_SIZE 0x10000
 void sram_sst_save(sst_cursor_t *c, unsigned flags);
 bool sram_sst_load(sst_cursor_t *c, unsigned flags);
