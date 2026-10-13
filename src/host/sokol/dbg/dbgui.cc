@@ -22,6 +22,7 @@ extern "C"
 {
 #include "core/aud/mix.h"
 #include "core/dap/dbg.h"
+#include "core/wdc/cpb.h"
 #include "core/wdc/cpu.h"
 #include "core/wdc/phi2.h"
 #include "core/sys/sys.h"
@@ -64,6 +65,7 @@ extern "C"
 #include "chips/ui/ui_dasm.h"        /* after w65c02dasm.h (impl calls w65c02dasm_op) */
 #include "chips/ui/ui_w65c02.h"      /* CPU register window */
 #include "host/sokol/dbg/ui_ria.h"  /* our RIA debug window (bespoke, not a chips fork) */
+#include "host/sokol/dbg/ui_cpb.h"  /* the PICO-SRAM-BANKED module's window, likewise */
 #include "host/sokol/dbg/ui_ini.h"  /* dummy elements: [RP6502][Launch] + [Window][Manager] */
 #include "chips/ui/ui_m6522.h"
 #include "chips/ui/ui_dbg.h"         /* disassembly/breakpoints */
@@ -78,6 +80,7 @@ static ui_m6522_t g_viawin;
 static ui_memedit_t g_memedit;
 static ui_memmap_t g_memmap;
 static ui_ria_t g_ria;
+static ui_cpb_t g_cpb;
 static ui_dasm_t g_dasm;
 static ui_audio_t g_audio;
 static bool g_inited;
@@ -461,6 +464,7 @@ static void dbgui_collect_settings(void)
     ui_memedit_save_settings(&g_memedit, &g_settings);
     ui_memmap_save_settings(&g_memmap, &g_settings);
     ui_ria_save_settings(&g_ria, &g_settings);
+    ui_cpb_save_settings(&g_cpb, &g_settings);
     ui_dasm_save_settings(&g_dasm, &g_settings);
     ui_audio_save_settings(&g_audio, &g_settings);
     ui_settings_add(&g_settings, "Debug Control", g_control_open);
@@ -503,6 +507,7 @@ static void chips_ini_applyall(ImGuiContext *, ImGuiSettingsHandler *)
     ui_memedit_load_settings(&g_memedit, &g_settings);
     ui_memmap_load_settings(&g_memmap, &g_settings);
     ui_ria_load_settings(&g_ria, &g_settings);
+    ui_cpb_load_settings(&g_cpb, &g_settings);
     ui_dasm_load_settings(&g_dasm, &g_settings);
     ui_audio_load_settings(&g_audio, &g_settings);
     g_control_open = ui_settings_isopen(&g_settings, "Debug Control");
@@ -633,6 +638,7 @@ static void dbgui_draw_menu(void)
             ImGui::MenuItem("MOS 65C02 (CPU)", nullptr, &g_cpuwin.open);
             ImGui::MenuItem("MOS 65C22 (VIA)", nullptr, &g_viawin.open);
             ImGui::MenuItem("RP6502 (RIA)", nullptr, &g_ria.open);
+            ImGui::MenuItem("PICO-SRAM-BANKED (CPB)", nullptr, &g_cpb.open, cpb_on);
             ImGui::MenuItem("Audio", nullptr, &g_audio.open);
             ImGui::EndMenu();
         }
@@ -853,6 +859,12 @@ void dbgui_init(void)
     rd.y = 30;
     ui_ria_init(&g_ria, &rd);
 
+    ui_cpb_desc_t bd{};
+    bd.title = "PICO-SRAM-BANKED (CPB)";
+    bd.x = 860;
+    bd.y = 60;
+    ui_cpb_init(&g_cpb, &bd);
+
     /* Memory editor: three layers (the 6502 space, the XRAM bank, and the RIA
      * xstack). The layer names carry the system address ranges, since the editor
      * itself addresses each layer 0..max_addr-1 (its read/write callbacks are
@@ -925,6 +937,7 @@ void dbgui_discard(void)
     ui_memmap_discard(&g_memmap);
     ui_memedit_discard(&g_memedit);
     ui_ria_discard(&g_ria);
+    ui_cpb_discard(&g_cpb);
     ui_m6522_discard(&g_viawin);
     ui_w65c02_discard(&g_cpuwin);
     ui_dbg_discard(&g_dbg);
@@ -1093,6 +1106,8 @@ void dbgui_draw(void)
     draw_credits();
     draw_rom_help();
     ui_ria_draw(&g_ria);
+    if (cpb_on)
+        ui_cpb_draw(&g_cpb);
 
     /* dbg.c is the authoritative run/stop engine + EXEC breakpoint store (shared
      * with the DAP adapter); ui_dbg's gutter/toolbar/hotkeys are a front-end
