@@ -20,6 +20,7 @@
 #include "core/str/oem.h"
 #include "core/str/path.h"
 #include "osal/os.h"
+#include "osal/vol.h"
 #include "osal/windows/dir.h"
 #include "osal/windows/errmap.h"
 #include <stdlib.h>
@@ -69,12 +70,88 @@ static bool win_reserved(const wchar_t *w)
            (!_wcsnicmp(name, L"COM", 3) || !_wcsnicmp(name, L"LPT", 3));
 }
 
+/* The drive a path is on when that is a mapped drive: named, or with no drive
+ * letter while the program is on one. *rest is the path without the name. */
+static vol_t *win_path_vol(const char *path, const char **rest, bool *named)
+{
+    vol_t *v = vol_named(path, rest);
+    *named = v != NULL;
+    if (v)
+        return v;
+    *rest = path;
+    if (win_has_drive(path) || (path_is_sep(path[0]) && path_is_sep(path[1])))
+        return NULL;
+    return vol_current();
+}
+
+/* The guest's name for a full host path inside a drive's folder, as
+ * vol_guest_path answers it. */
+static char *win_guest_of(const wchar_t *full, bool *held)
+{
+    *held = false;
+    if (!vol_count())
+        return NULL;
+    char *u8 = win_wide_to_utf8(full);
+    char *g = u8 ? vol_guest_path(u8, held) : NULL;
+    free(u8);
+    return g;
+}
+
+static bool win_vol_root(const wchar_t *full)
+{
+    if (!vol_count())
+        return false;
+    char *u8 = win_wide_to_utf8(full);
+    const char *rest;
+    bool root = u8 && vol_holding(u8, &rest) && !rest[0];
+    free(u8);
+    return root;
+}
+
+static wchar_t *win_vol_wide(const vol_t *v, const char *rest, bool named,
+                             api_errno *err)
+{
+    if (!path_fat_ok(rest, named, err))
+        return NULL;
+    if (strlen(rest) > API_PATH_MAX || !oem_maps_oem(rest))
+    {
+        *err = API_EINVAL;
+        return NULL;
+    }
+    size_t usz = oem_to_utf8(rest, NULL, 0) + 1;
+    char *u8 = malloc(usz);
+    if (!u8)
+    {
+        *err = API_ENOMEM;
+        return NULL;
+    }
+    oem_to_utf8(rest, u8, usz);
+    char *host = vol_host_path(v, NULL, u8, err);
+    free(u8);
+    wchar_t *w = host ? win_utf8_to_wide(host, err) : NULL;
+    free(host);
+    if (w && win_reserved(w))
+    {
+        free(w);
+        *err = API_EINVAL;
+        return NULL;
+    }
+    return w;
+}
+
 /* The FAT rules are applied before a path is passed to Win32, because Win32
  * gives ':' and the wildcards other meanings: a device, a stream, a pattern.
  * Two leading separators start a UNC path or a \\?\ or \\.\ device path,
- * none of which uses a drive letter. */
+ * none of which uses a drive letter. A path with no drive letter, while the
+ * program is on a mapped drive, is on that drive, whose root is where "/"
+ * starts. */
 wchar_t *path_to_wide(const char *path, api_errno *err)
 {
+    const char *rest;
+    bool named;
+    vol_t *v = win_path_vol(path, &rest, &named);
+    if (v)
+        return win_vol_wide(v, rest, named, err);
     bool drive = win_has_drive(path);
     if ((drive && !win_drive_mounted(path[0])) ||
         (path_is_sep(path[0]) && path_is_sep(path[1])))
@@ -203,22 +280,50 @@ wchar_t *win_full_path(const wchar_t *w, api_errno *err)
 /* NULL when no program could open the absolute path: one with a character the
  * code page cannot hold, or one on a UNC share, which a relative path resolves
  * to when the working directory is on one. A drive path in full starts with
- * "X:", and a UNC one with two backslashes. */
+ * "X:", and a UNC one with two backslashes. Takes w and frees it. */
+static char *win_name_of(wchar_t *w)
+{
+    api_errno ignored;
+    if (!w)
+        return NULL;
+    wchar_t *wfull = win_full_path(w, &ignored);
+    free(w);
+    if (!wfull)
+        return NULL;
+    bool held;
+    char *out = win_guest_of(wfull, &held);
+    if (!held && wfull[1] == L':' && oem_maps_wide((const uint16_t *)wfull))
+        out = path_from_wide(wfull, &ignored);
+    free(wfull);
+    return out;
+}
+
 char *os_dir_realpath(const char *path)
 {
     api_errno ignored;
-    wchar_t *wpath = path_to_wide(path, &ignored);
-    if (!wpath)
+    return win_name_of(path_to_wide(path, &ignored));
+}
+
+char *os_dir_from_host(const char *host)
+{
+    api_errno ignored;
+    wchar_t *w = win_utf8_to_wide(host, &ignored);
+    if (w && GetFileAttributesW(w) == INVALID_FILE_ATTRIBUTES)
+    {
+        free(w);
         return NULL;
-    wchar_t *wfull = win_full_path(wpath, &ignored);
-    free(wpath);
-    if (!wfull)
+    }
+    /* A host name a program could not open again, such as a device name like
+     * CON, is no name at all. */
+    char *name = win_name_of(w);
+    wchar_t *again = name ? path_to_wide(name, &ignored) : NULL;
+    if (!again)
+    {
+        free(name);
         return NULL;
-    char *out = wfull[1] == L':' && oem_maps_wide((const uint16_t *)wfull)
-                    ? path_from_wide(wfull, &ignored)
-                    : NULL;
-    free(wfull);
-    return out;
+    }
+    free(again);
+    return name;
 }
 
 char *os_dir_path_hold(const char *path)
@@ -328,9 +433,11 @@ bool drive_validate(int des, api_errno *err)
 
 bool drive_stat(const char *path, f_stat_t *info, api_errno *err)
 {
-    if (!path[0] || (win_has_drive(path) && !path[2]))
+    const char *rest;
+    if (!path[0] || (win_has_drive(path) && !path[2]) ||
+        (vol_named(path, &rest) && !rest[0]))
     {
-        *err = path[0] && !win_drive_mounted(path[0]) ? API_ENODEV : API_EINVAL;
+        *err = win_has_drive(path) && !win_drive_mounted(path[0]) ? API_ENODEV : API_EINVAL;
         return false;
     }
     wchar_t *w = path_to_wide(path, err);
@@ -349,7 +456,7 @@ bool drive_stat(const char *path, f_stat_t *info, api_errno *err)
     while (n > 3 && full[n - 1] == L'\\')
         full[--n] = 0;
     bool ok;
-    if (n == 3 && full[1] == L':')
+    if ((n == 3 && full[1] == L':') || win_vol_root(full))
     {
         /* Reading the attributes only checks that the volume is mounted. */
         ok = win_ok(GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES, err);
@@ -598,16 +705,48 @@ static void win_note_cwd(void)
 }
 
 /* A path on another drive moves the process there, so a chdir switches drives
- * as it does on every machine. */
+ * as it does on every machine. A folder on a mapped drive becomes that drive's
+ * working directory, and the process stays where it is. */
 bool drive_chdir(const char *path, api_errno *err)
 {
     if (!path[0])
         return true;
+    const char *rest;
+    bool named;
+    vol_t *v = win_path_vol(path, &rest, &named);
     wchar_t *w = path_to_wide(path, err);
     if (!w)
         return false;
-    win_note_cwd();
-    bool ok = win_ok(SetCurrentDirectoryW(w), err);
+    bool ok;
+    if (v)
+    {
+        DWORD a = GetFileAttributesW(w);
+        ok = win_ok(a != INVALID_FILE_ATTRIBUTES, err);
+        if (ok && !(a & FILE_ATTRIBUTE_DIRECTORY))
+        {
+            *err = win_error_to_api(ERROR_DIRECTORY);
+            ok = false;
+        }
+        char *u8 = ok ? win_wide_to_utf8(w) : NULL;
+        if (ok && !u8)
+        {
+            *err = API_ENOMEM;
+            ok = false;
+        }
+        if (ok)
+        {
+            vol_set_cwd(v, u8);
+            vol_set_current(v);
+        }
+        free(u8);
+    }
+    else
+    {
+        win_note_cwd();
+        ok = win_ok(SetCurrentDirectoryW(w), err);
+        if (ok)
+            vol_set_current(NULL);
+    }
     free(w);
     return ok;
 }
@@ -621,10 +760,36 @@ bool drive_chdrive(const char *drive, api_errno *err)
 {
     if (!drive[0])
         return true;
+    const char *rest;
+    vol_t *v = vol_named(drive, &rest);
+    if (v)
+    {
+        if (rest[0])
+        {
+            *err = API_ENODEV;
+            return false;
+        }
+        vol_set_current(v);
+        return true;
+    }
     if (!win_has_drive(drive) || drive[2] || !win_drive_mounted(drive[0]))
     {
         *err = API_ENODEV;
         return false;
+    }
+    if (vol_current())
+    {
+        /* The process stayed in the host folder it was last in while the
+         * program was on a mapped drive, so that folder is X's when the
+         * folder is on X. */
+        vol_set_current(NULL);
+        api_errno ignored;
+        wchar_t *here = win_full_path(L".", &ignored);
+        bool same = here && here[1] == L':' &&
+                    towupper(here[0]) == towupper((wint_t)drive[0]);
+        free(here);
+        if (same)
+            return true;
     }
     win_note_cwd();
     const wchar_t w[3] = {(wchar_t)drive[0], L':', 0};
@@ -698,11 +863,27 @@ bool drive_utime(const char *path, const f_stat_t *info, api_errno *err)
  * program could write refers to it. */
 bool drive_getcwd(char *buf, size_t size, api_errno *err)
 {
-    wchar_t *w = win_full_path(L".", err);
+    vol_t *v = vol_current();
+    wchar_t *w = v ? win_utf8_to_wide(vol_cwd(v), err) : win_full_path(L".", err);
     if (!w)
         return false;
     bool ok = false;
-    if (w[1] != L':')
+    bool held;
+    char *guest = win_guest_of(w, &held);
+    if (held)
+    {
+        if (!guest)
+            *err = API_EINVAL;
+        else if (strlen(guest) >= size)
+            *err = API_ENOMEM;
+        else
+        {
+            strcpy(buf, guest);
+            ok = true;
+        }
+        free(guest);
+    }
+    else if (w[1] != L':')
         *err = API_ENODEV;
     else if (oem_from_wide((const uint16_t *)w, buf, size) >= size)
         *err = API_ENOMEM;

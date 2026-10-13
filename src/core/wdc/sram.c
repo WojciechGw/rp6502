@@ -5,6 +5,7 @@
  */
 
 #include "core/wdc/sram.h"
+#include "core/wdc/cpb.h"
 #include "core/sys/random.h"
 #include <string.h>
 
@@ -42,12 +43,13 @@ void sram_set_fill(bool random, uint8_t value, uint32_t seed)
 void sram_init(void)
 {
     if (!sram_fill_random)
-    {
         memset(sram, sram_fill_value, sizeof sram);
-        return;
+    else
+    {
+        uint32_t state = sram_fill_seed ^ 0x9E3779B9u;
+        sys_random_fill(sram, sizeof sram, &state);
     }
-    uint32_t state = sram_fill_seed ^ 0x9E3779B9u;
-    sys_random_fill(sram, sizeof sram, &state);
+    cpb_init_memory(sram_fill_random, sram_fill_value, sram_fill_seed);
 }
 
 /* Every write lands, whatever the address, because sram[] shadows the whole
@@ -57,8 +59,18 @@ void sram_init(void)
  * left there. */
 void sram_tick(uint16_t addr, bool read, uint8_t *data)
 {
+    if (cpb_on)
+    {
+        cpb_tick(addr, read, data);
+        return;
+    }
     if (!read)
         sram[addr] = *data;
     else if (addr <= SRAM_MMAP_HI)
         *data = sram[addr];
+}
+
+uint8_t *sram_view(uint16_t addr)
+{
+    return cpb_on ? cpb_view(addr) : &sram[addr];
 }

@@ -26,7 +26,8 @@ function(rp6502_osal_windows target)
         ${RP6502_OSAL_WINDOWS}/dir.c
         ${RP6502_OSAL_WINDOWS}/errmap.c
         ${RP6502_OSAL_WINDOWS}/fs.c
-        ${RP6502_OSAL_WINDOWS}/os.c)
+        ${RP6502_OSAL_WINDOWS}/os.c
+        ${RP6502_OSAL_WINDOWS}/../vol.c)
     # CancelIoEx and SetFileInformationByHandle in fs.c, and
     # CreateWaitableTimerExW and SHGetKnownFolderPath in os.c, are declared
     # only when _WIN32_WINNT names Vista or later, so the floor cannot go below

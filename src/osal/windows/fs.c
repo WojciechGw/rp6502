@@ -316,6 +316,15 @@ char *fs_host_realpath(const char *host)
     return out;
 }
 
+bool fs_host_is_dir(const char *host)
+{
+    api_errno ignored;
+    wchar_t *w = win_utf8_to_wide(host, &ignored);
+    DWORD a = w ? GetFileAttributesW(w) : INVALID_FILE_ATTRIBUTES;
+    free(w);
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
+}
+
 bool fs_rom_remove(const char *name, api_errno *err)
 {
     (void)name;

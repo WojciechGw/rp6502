@@ -25,7 +25,8 @@ bool sys_break_to_launcher(void)
     if (proc_is_launcher())
         return false;
     api_set_ax(0xFFFF);
-    sys_break_request();
+    sys_stop();
+    // sys_break_request(); Alt+F4 does not work
     return true;
 }
 

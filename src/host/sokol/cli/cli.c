@@ -6,6 +6,7 @@
  */
 
 #include "host/sokol/cli/cli.h"
+#include "core/wdc/cpb.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,7 +90,8 @@ enum
     OPT_HELP = 256, OPT_SCREENSHOT, OPT_FRAMES, OPT_SCALE, OPT_FILTER, OPT_SCRIPT,
     OPT_INSTALL, OPT_SAVE_DIR, OPT_BGCOLOR, OPT_PHI2, OPT_CP, OPT_SEED, OPT_FILL,
     OPT_MUTE, OPT_DEBUG, OPT_DAP, OPT_CREDITS, OPT_VERSION, OPT_INI,
-    OPT_CRC, OPT_HEADLESS, OPT_STDIN,
+    OPT_CRC, OPT_HEADLESS, OPT_STDIN, OPT_CPB, OPT_CPB_TEMP, OPT_CPB_DELAY,
+    OPT_DRIVE, OPT_NO_MIRROR,
 };
 static const struct option longopts[] = {
     {"help",         no_argument,       NULL, OPT_HELP},
@@ -114,6 +116,11 @@ static const struct option longopts[] = {
     {"credits",      no_argument,       NULL, OPT_CREDITS},
     {"version",      no_argument,       NULL, OPT_VERSION},
     {"ini",          required_argument, NULL, OPT_INI},
+    {"cpb",          no_argument,       NULL, OPT_CPB},
+    {"cpb-temp",     required_argument, NULL, OPT_CPB_TEMP},
+    {"cpb-delay",    required_argument, NULL, OPT_CPB_DELAY},
+    {"drive",        required_argument, NULL, OPT_DRIVE},
+    {"no-mirror",    no_argument,       NULL, OPT_NO_MIRROR},
     {NULL, 0, NULL, 0},
 };
 
@@ -134,12 +141,18 @@ void cli_usage(FILE *out, const char *argv0)
             "  --stdin                   host stdin is the machine's console, and a terminal\n"
             "                            there is the console: keys raw, screen drawn on it,\n"
             "                            Ctrl-\\ the way out. Implied by --headless\n"
+            "  --no-mirror               the program's stdout and stderr stay on the\n"
+            "                            machine's screen, not copied to the host's\n"
             "  --install <file>          install a file on the null drive, reached as\n"
             "                            :basename, which a program runs or reads;\n"
             "                            repeatable, and the first one boots when no\n"
             "                            ROM is named\n"
             "  --save-dir <folder>       the folder behind SAVE:, made by the first save\n"
             "                            (default: this OS's folder for saved data)\n"
+            "  --drive NAME=<folder>     a host folder as the drive NAME:, such as\n"
+            "                            MSC0=usb for MSC0:; NAME is 2-8 letters and\n"
+            "                            digits; repeatable, up to ten drives; the\n"
+            "                            program starts on the first\n"
             "  --bgcolor RRGGBB          letterbox/pillarbox fill color, # optional\n"
             "                            (default 000000)\n"
             "  --phi2 <khz>              6502 clock in kHz (100-8000, default 8000);\n"
@@ -159,6 +172,13 @@ void cli_usage(FILE *out, const char *argv0)
             "  --version                 print the version and exit\n"
             "  --ini <file>              config file for the debugger UI layout\n"
             "                            (ImGui format; e.g. the workspace .rp6502)\n"
+            "  --cpb                     a PICO-SRAM-BANKED module in the SRAM socket:\n"
+            "                            512 KB in 2 KB banks, 16 task maps; RAM\n"
+            "                            starts zeroed unless --fill is given\n"
+            "  --cpb-temp <C>            its core temperature at $FED6/$FED7\n"
+            "                            (0-127.5, default 25)\n"
+            "  --cpb-delay <cycles>      PHI2 cycles before a write to $FEDE-$FEFF\n"
+            "                            takes effect (0-1000000, default 0)\n"
             "  -- <args...>              pass the remaining words to the ROM as argv[1..]\n",
             argv0);
 }
@@ -205,6 +225,7 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
         case OPT_CRC: o->crc = true; break;
         case OPT_HEADLESS: o->headless = true; break;
         case OPT_STDIN: o->console = true; break;
+        case OPT_NO_MIRROR: o->no_mirror = true; break;
         case OPT_FRAMES:
         {
             long long v;
@@ -250,6 +271,19 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
             break;
         }
         case OPT_SAVE_DIR: o->save_dir = optarg; break;
+        case OPT_DRIVE:
+        {
+            int max = (int)(sizeof(o->drives) / sizeof(o->drives[0]));
+            if (!strchr(optarg, '='))
+                return cli_bad("--drive", optarg), 2;
+            if (o->n_drives == max)
+            {
+                fprintf(stderr, "rp6502-emu: too many --drive (max %d)\n", max);
+                return 2;
+            }
+            o->drives[o->n_drives++] = optarg;
+            break;
+        }
         case OPT_BGCOLOR:
             if (!parse_hex_color(optarg, &o->bg_r, &o->bg_g, &o->bg_b))
             {
@@ -292,7 +326,27 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
                                 "(want random or a byte 0-255)\n", optarg);
                 return 2;
             }
+            o->have_fill = true;
             break;
+        case OPT_CPB: o->cpb = true; break;
+        case OPT_CPB_TEMP:
+        {
+            char *end;
+            o->cpb_temp = strtod(optarg, &end);
+            if (end == optarg || *end || !(o->cpb_temp >= 0 && o->cpb_temp <= 127.5))
+                return cli_bad("--cpb-temp", optarg), 2;
+            o->have_cpb_temp = true;
+            break;
+        }
+        case OPT_CPB_DELAY:
+        {
+            long long v;
+            if (!cli_number(optarg, &v) || v < 0 || v > CPB_DELAY_MAX)
+                return cli_bad("--cpb-delay", optarg), 2;
+            o->cpb_delay = (uint32_t)v;
+            o->have_cpb_delay = true;
+            break;
+        }
         case OPT_MUTE: o->mute = true; break;
         case OPT_DEBUG: o->debug = true; break;
         case OPT_DAP: o->dap = true; break;

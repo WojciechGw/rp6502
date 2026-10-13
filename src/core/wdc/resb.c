@@ -6,6 +6,7 @@
 
 #include "core/sys/config.h"
 #include "core/wdc/bus.h"
+#include "core/wdc/cpb.h"
 #include "core/wdc/phi2.h"
 #include "core/wdc/resb.h"
 #include "core/wdc/via.h"
@@ -21,6 +22,7 @@ void resb_assert(void)
     cpu_reset();
     via_reset();
     bus_reset();
+    cpb_resb(true);
     /* A ROM may have changed the running rate; a reset takes it back to the
      * configured one. */
     phi2_set_khz_run(phi2_get_khz());
@@ -33,4 +35,5 @@ void resb_assert(void)
  * 6502 and the 6522 are held. */
 void resb_release(void)
 {
+    cpb_resb(false);
 }

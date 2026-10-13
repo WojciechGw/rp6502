@@ -18,6 +18,7 @@
 #include "core/str/oem.h"
 #include "core/str/path.h"
 #include "osal/os.h"
+#include "osal/vol.h"
 #include "osal/posix/dir.h"
 #include "osal/posix/errmap.h"
 #include <dirent.h>
@@ -37,15 +38,59 @@
 
 #define DIR_NAME_MAX 256 /* an entry's name, not a path */
 
-/* FS: is the only drive here, so a path without it, such as a host path from
- * the command line, is already a host path. */
+/* FS: is the host's drive, so a path without it, such as a host path from the
+ * command line, is already a host path, unless the program is on a mapped
+ * drive. */
 static const char *strip_drive(const char *path)
 {
     return strncasecmp(path, "FS:", 3) == 0 ? path + 3 : path;
 }
 
+/* The drive a path is on when that is a mapped drive: named, or without FS:
+ * while the program is on one. *rest is the path without the name. */
+static vol_t *posix_path_vol(const char *path, const char **rest, bool *named)
+{
+    vol_t *v = vol_named(path, rest);
+    *named = v != NULL;
+    if (v)
+        return v;
+    *rest = path;
+    return strip_drive(path) == path ? vol_current() : NULL;
+}
+
+static char *posix_vol_path(const vol_t *v, const char *rest, bool named,
+                            api_errno *err)
+{
+    if (!path_fat_ok(rest, named, err))
+        return NULL;
+    if (!oem_maps_oem(rest))
+    {
+        *err = API_EINVAL;
+        return NULL;
+    }
+    size_t usz = oem_to_utf8(rest, NULL, 0) + 1;
+    char *u8 = malloc(usz);
+    if (!u8)
+    {
+        *err = API_ENOMEM;
+        return NULL;
+    }
+    oem_to_utf8(rest, u8, usz);
+    for (char *p = u8; *p; p++)
+        if (*p == '\\')
+            *p = '/';
+    char *host = vol_host_path(v, NULL, u8, err);
+    free(u8);
+    return host;
+}
+
 char *path_to_utf8(const char *path, api_errno *err)
 {
+    const char *rest;
+    bool named;
+    vol_t *v = posix_path_vol(path, &rest, &named);
+    if (v)
+        return posix_vol_path(v, rest, named, err);
     const char *native = strip_drive(path);
     if (!path_fat_ok(native, native != path, err))
         return NULL;
@@ -77,6 +122,10 @@ char *path_to_utf8(const char *path, api_errno *err)
  * longer than its input, and the source length bounds the allocation. */
 char *path_from_host(const char *host)
 {
+    bool held;
+    char *guest = vol_guest_path(host, &held);
+    if (held)
+        return guest;
     if (strchr(host, '\\') || !oem_maps_utf8(host))
         return NULL;
     size_t sz = 3 + strlen(host) + 1;
@@ -114,6 +163,14 @@ char *os_dir_realpath(const char *path)
         return NULL;
     char *r = realpath(u8, NULL);
     free(u8);
+    char *out = r ? path_from_host(r) : NULL;
+    free(r);
+    return out;
+}
+
+char *os_dir_from_host(const char *host)
+{
+    char *r = realpath(host, NULL);
     char *out = r ? path_from_host(r) : NULL;
     free(r);
     return out;
@@ -298,6 +355,12 @@ bool drive_validate(int des, api_errno *err)
 
 bool drive_stat(const char *path, f_stat_t *info, api_errno *err)
 {
+    const char *rest;
+    if (vol_named(path, &rest) && !rest[0])
+    {
+        *err = API_EINVAL;
+        return false;
+    }
     char *u8 = path_to_utf8(path, err);
     if (!u8)
         return false;
@@ -309,8 +372,9 @@ bool drive_stat(const char *path, f_stat_t *info, api_errno *err)
     }
     struct stat st, root;
     bool ok = posix_ok(stat(u8, &st) == 0, err);
-    if (ok && stat("/", &root) == 0 && st.st_dev == root.st_dev &&
-        st.st_ino == root.st_ino)
+    if (ok && ((vol_holding(u8, &rest) && !rest[0]) ||
+               (stat("/", &root) == 0 && st.st_dev == root.st_dev &&
+                st.st_ino == root.st_ino)))
         f_stat_root(info);
     else if (ok)
     {
@@ -507,25 +571,63 @@ bool drive_mkdir(const char *path, api_errno *err)
     return ok;
 }
 
+/* A folder on a mapped drive becomes that drive's working directory, and the
+ * process stays where it is. */
 bool drive_chdir(const char *path, api_errno *err)
 {
+    const char *rest;
+    bool named;
+    vol_t *v = posix_path_vol(path, &rest, &named);
     char *u8 = path_to_utf8(path, err);
     if (!u8)
         return false;
-    /* A path of no name is the drive in use, the way f_chdir("0:") is a no-op
-     * on FatFs. */
-    bool ok = posix_ok(chdir(u8[0] ? u8 : ".") == 0, err);
+    bool ok;
+    if (v)
+    {
+        struct stat st;
+        ok = posix_ok(stat(u8, &st) == 0, err);
+        if (ok && !S_ISDIR(st.st_mode))
+        {
+            *err = errno_to_api(ENOTDIR);
+            ok = false;
+        }
+        if (ok)
+        {
+            vol_set_cwd(v, u8);
+            vol_set_current(v);
+        }
+    }
+    else
+    {
+        /* A path of no name is the drive in use, the way f_chdir("0:") is a
+         * no-op on FatFs. */
+        ok = posix_ok(chdir(u8[0] ? u8 : ".") == 0, err);
+        if (ok && path[0])
+            vol_set_current(NULL);
+    }
     free(u8);
     return ok;
 }
 
-/* FS: and the bare current drive are the only drives, and anything else is a
- * missing device. The name must leave nothing behind it, so "FS:junk" names no
- * drive, and neither does the null drive. */
+/* FS:, the mapped drives and the bare current drive are the only drives, and
+ * anything else is a missing device. The name must leave nothing behind it,
+ * so "FS:junk" names no drive, and neither does the null drive. The process
+ * never left FS:'s folder while the program was on a mapped drive. */
 bool drive_chdrive(const char *drive, api_errno *err)
 {
-    if (!strip_drive(drive)[0])
+    const char *rest;
+    vol_t *v = vol_named(drive, &rest);
+    if (v && !rest[0])
+    {
+        vol_set_current(v);
         return true;
+    }
+    if (!v && !strip_drive(drive)[0])
+    {
+        if (drive[0])
+            vol_set_current(NULL);
+        return true;
+    }
     *err = API_ENODEV;
     return false;
 }
@@ -590,9 +692,24 @@ bool drive_utime(const char *path, const f_stat_t *info, api_errno *err)
 
 bool drive_getcwd(char *buf, size_t size, api_errno *err)
 {
-    char *u8 = getcwd(NULL, 0); /* getcwd allocates an answer of its own length */
+    /* getcwd allocates an answer of its own length */
+    vol_t *v = vol_current();
+    char *u8 = v ? strdup(vol_cwd(v)) : getcwd(NULL, 0);
     if (!posix_ok(u8 != NULL, err))
         return false;
+    bool held;
+    char *guest = vol_guest_path(u8, &held);
+    if (held)
+    {
+        bool fits = guest && strlen(guest) < size;
+        if (fits)
+            strcpy(buf, guest);
+        else
+            *err = guest ? API_ENOMEM : API_EINVAL;
+        free(guest);
+        free(u8);
+        return fits;
+    }
     /* shown_from_utf8 returns the untruncated length, so a short buffer is
      * an error here rather than a path the caller cannot use. */
     bool ok = size > 3 && shown_from_utf8(u8, buf + 3, size - 3) < size - 3;

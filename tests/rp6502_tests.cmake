@@ -79,6 +79,20 @@ rp6502_test_rom(aud_roms GEN ${RP6502_TESTS_DIR}/gen/aud_rom_gen.py
     DEPENDS ${RP6502_ROM_GEN}
     COMMENT "Generating the audio bring-up ROMs")
 
+set(CPB_ROM ${RP6502_TEST_ROM_DIR}/cpb.rp6502)
+rp6502_test_rom(cpb_rom GEN ${RP6502_TESTS_DIR}/gen/cpb_rom_gen.py
+    ARGS --emit ${CPB_ROM}
+    OUTPUTS ${CPB_ROM}
+    DEPENDS ${RP6502_ROM_GEN}
+    COMMENT "Generating the CPB banking probe ROM")
+
+set(DRIVE_ROM ${RP6502_TEST_ROM_DIR}/drive.rp6502)
+rp6502_test_rom(drive_rom GEN ${RP6502_TESTS_DIR}/gen/drive_rom_gen.py
+    ARGS --emit ${DRIVE_ROM}
+    OUTPUTS ${DRIVE_ROM}
+    DEPENDS ${RP6502_ROM_GEN}
+    COMMENT "Generating the mapped drive probe ROM")
+
 set(STREAM_ROM ${RP6502_TEST_ROM_DIR}/stream.rp6502)
 rp6502_test_rom(stream_rom GEN ${RP6502_TESTS_DIR}/gen/stream_rom_gen.py
     ARGS --emit ${STREAM_ROM}

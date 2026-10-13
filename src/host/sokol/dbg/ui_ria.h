@@ -151,7 +151,7 @@ void ui_ria_draw(ui_ria_t *win)
             /* The register window runs to $FFFF, so the vectors are read out
              * of regs[] as well, which is where the CPU fetches them from. */
             auto peek = [](uint16_t a) -> uint8_t {
-                return (a >= RIA_MMAP_LO) ? regs[a & 0x1F] : sram[a];
+                return (a >= RIA_MMAP_LO) ? regs[a & 0x1F] : *sram_view(a);
             };
             for (auto &r : _ui_ria_regs)
             {
