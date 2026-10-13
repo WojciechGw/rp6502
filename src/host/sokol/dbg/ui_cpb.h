@@ -148,14 +148,16 @@ static void _ui_cpb_map_table(ui_cpb_t *win, const char *id, const uint8_t *map)
         ImGui::TableNextColumn();
         ImGui::Text("$%04X-$%04X", lo, lo + CPB_BLOCK_SIZE - 1);
         ImGui::TableNextColumn();
-        char label[24];
-        std::snprintf(label, sizeof label, "%3u%s##%s%d", (unsigned)map[s],
-                      s == CPB_PINNED_SLOT ? " pinned" : "", id, s);
+        char label[16];
+        std::snprintf(label, sizeof label, "%3u%s", (unsigned)map[s],
+                      s == CPB_PINNED_SLOT ? " pinned" : "");
         bool remapped = map[s] != s;
         if (remapped)
             ImGui::PushStyleColor(ImGuiCol_Text, UI_CPB_REMAPPED);
+        ImGui::PushID(s);
         if (ImGui::Selectable(label, win->sel_block == map[s]))
             win->sel_block = map[s];
+        ImGui::PopID();
         if (remapped)
             ImGui::PopStyleColor();
     }
