@@ -59,8 +59,8 @@ UTEST(sst, a_size_is_fixed_and_answered_before_anything_runs)
 UTEST(sst, the_shape_is_the_shape)
 {
     ASSERT_EQ(take(), (const char *)NULL);
-    ASSERT_EQ(sst_size(), (size_t)683969);
-    ASSERT_EQ((unsigned)((blob[6] << 8) | blob[7]), 28u);
+    ASSERT_EQ(sst_size(), (size_t)684003);
+    ASSERT_EQ((unsigned)((blob[6] << 8) | blob[7]), 29u);
 }
 
 UTEST(sst, a_blob_is_framed)
