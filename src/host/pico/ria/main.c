@@ -25,8 +25,10 @@ bool sys_break_to_launcher(void)
     if (proc_is_launcher())
         return false;
     api_set_ax(0xFFFF);
+    // Stop as exit() does, so proc_stop can queue the launcher.
+    // A break would run rom_break after it in the same sys_commit,
+    // and ROM_IDLE would cancel that load.
     sys_stop();
-    // sys_break_request(); Alt+F4 does not work
     return true;
 }
 
