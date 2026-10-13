@@ -334,6 +334,18 @@ UTEST(cpb, a_savestate_that_aliases_block_31_is_refused)
     ASSERT_FALSE(cpb_sst_load(&c, 0));
 }
 
+UTEST(cpb, a_power_on_counts_resets_from_zero)
+{
+    fresh(0);
+    cpb_resb(true);
+    cpb_resb(false);
+    cpb_resb(true);
+    cpb_power_on();
+    cpb_resb(true);
+    ASSERT_EQ(sram[CPB_REG_RESETS], 1);
+    cpb_resb(false);
+}
+
 UTEST(cpb, the_debugger_sees_the_state)
 {
     fresh(0);

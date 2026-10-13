@@ -394,6 +394,8 @@ int main(int argc, char **argv)
         return 1;
     }
     bool booted = proc_boot(rom, o.n_rom_args, o.rom_args, 0);
+    if (booted)
+        app_set_boot(rom, o.n_rom_args, o.rom_args);
     free(rom);
     if (!booted)
     {

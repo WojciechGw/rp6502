@@ -57,6 +57,10 @@ uint8_t *cpb_view(uint16_t addr);
 /* The RESB line, low = asserted. */
 void cpb_resb(bool low);
 
+/* The module powering up: no resets counted, and RESB seen high, so the next
+ * assert is counted as the first. */
+void cpb_power_on(void);
+
 void cpb_task(void);
 
 /* What the debugger window shows. Nothing here changes the module. */
