@@ -24,6 +24,7 @@ static uint8_t *cpb_slot[CPB_SLOTS];
 static uint8_t cpb_active_map[CPB_SLOTS];
 static uint8_t cpb_task_map[CPB_TASKS][CPB_SLOTS];
 static bool cpb_gate;
+static bool cpb_status_hidden;
 static uint8_t cpb_active_task;
 static uint8_t cpb_edit_task;
 static uint8_t cpb_knock_pos;
@@ -99,6 +100,17 @@ static void cpb_publish_temperature(void)
     sram[CPB_REG_TEMP_MAX] = cpb_temp;
 }
 
+/* The first '+', 'T' or 'C' since the last reset. Until then $FED5-$FED7 are
+ * the program's RAM, so a loader's verify finds what its write left there. */
+static void cpb_status_show(void)
+{
+    if (!cpb_status_hidden)
+        return;
+    cpb_status_hidden = false;
+    sram[CPB_REG_RESETS] = cpb_resets;
+    cpb_publish_temperature();
+}
+
 static void cpb_knock_feed(uint8_t data)
 {
     if (cpb_knock_pos < sizeof cpb_knock_prefix)
@@ -114,6 +126,7 @@ static void cpb_knock_feed(uint8_t data)
     {
     case '+':
         cpb_gate = true;
+        cpb_status_show();
         break;
     case '-':
         cpb_reset_all_maps();
@@ -121,6 +134,7 @@ static void cpb_knock_feed(uint8_t data)
         break;
     case 'T':
     case 'C':
+        cpb_status_show();
         cpb_publish_temperature();
         break;
     }
@@ -203,11 +217,10 @@ void cpb_init_memory(bool random, uint8_t value, uint32_t seed)
     cpb_queue_count = 0;
     cpb_reset_all_maps();
     cpb_gate = false;
+    cpb_status_hidden = true;
     cpb_active_task = 0;
     cpb_edit_task = 0;
     cpb_knock_pos = 0;
-    sram[CPB_REG_RESETS] = cpb_resets;
-    cpb_publish_temperature();
     cpb_temp_cycle = cpb_cycle;
 }
 
@@ -236,9 +249,9 @@ uint8_t *cpb_view(uint16_t addr)
 }
 
 /* RESB is asserted again on every stop, so only the falling edge counts, as
- * the module's debounced tap does. Memory survives; only the maps reset. The
- * maps reset with the module off too, so a savestate always carries valid
- * ones. */
+ * the module's debounced tap does. Memory survives and no byte is written;
+ * only the maps reset and the status bytes hide. The maps reset with the
+ * module off too, so a savestate always carries valid ones. */
 void cpb_resb(bool low)
 {
     bool edge = low && !cpb_resb_low;
@@ -248,11 +261,12 @@ void cpb_resb(bool low)
     cpb_queue_drain();
     cpb_reset_all_maps();
     cpb_gate = false;
+    cpb_status_hidden = true;
     cpb_active_task = 0;
     cpb_edit_task = 0;
     cpb_knock_pos = 0;
     if (cpb_on)
-        sram[CPB_REG_RESETS] = ++cpb_resets;
+        ++cpb_resets;
 }
 
 void cpb_power_on(void)
@@ -270,13 +284,15 @@ void cpb_task(void)
     if (cpb_cycle - cpb_temp_cycle >= (uint32_t)phi2_get_khz_run() * 1000u)
     {
         cpb_temp_cycle = cpb_cycle;
-        cpb_publish_temperature();
+        if (!cpb_status_hidden)
+            cpb_publish_temperature();
     }
 }
 
 void cpb_dbg_get(cpb_dbg_t *out)
 {
     out->gate = cpb_gate;
+    out->status_hidden = cpb_status_hidden;
     out->active_task = cpb_active_task;
     out->edit_task = cpb_edit_task;
     out->knock_pos = cpb_knock_pos;
@@ -300,6 +316,7 @@ void cpb_sst_save(sst_cursor_t *c, unsigned flags)
     sst_put(c, cpb_active_map, sizeof cpb_active_map);
     sst_put(c, cpb_task_map, sizeof cpb_task_map);
     sst_put_bool(c, cpb_gate);
+    sst_put_bool(c, cpb_status_hidden);
     sst_put_u8(c, cpb_active_task);
     sst_put_u8(c, cpb_edit_task);
     sst_put_u8(c, cpb_knock_pos);
@@ -337,6 +354,7 @@ bool cpb_sst_load(sst_cursor_t *c, unsigned flags)
     sst_get(c, active_map, sizeof active_map);
     sst_get(c, task_map, sizeof task_map);
     bool gate = sst_get_bool(c);
+    bool status_hidden = sst_get_bool(c);
     uint8_t active_task = sst_get_u8(c);
     uint8_t edit_task = sst_get_u8(c);
     uint8_t knock_pos = sst_get_u8(c);
@@ -369,6 +387,7 @@ bool cpb_sst_load(sst_cursor_t *c, unsigned flags)
         cpb_map_slot(s, active_map[s]);
     memcpy(cpb_task_map, task_map, sizeof cpb_task_map);
     cpb_gate = gate;
+    cpb_status_hidden = status_hidden;
     cpb_active_task = active_task;
     cpb_edit_task = edit_task;
     cpb_knock_pos = knock_pos;
