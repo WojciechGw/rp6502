@@ -28,6 +28,8 @@
 #define CPB_QUEUE_LEN 256
 #define CPB_DELAY_MAX 1000000u
 
+/* Written only after a '+', 'T' or 'C' knock since the last reset; plain RAM
+ * until then. */
 #define CPB_REG_RESETS 0xFED5
 #define CPB_REG_TEMP_MIN 0xFED6
 #define CPB_REG_TEMP_MAX 0xFED7
@@ -66,7 +68,7 @@ void cpb_task(void);
 /* What the debugger window shows. Nothing here changes the module. */
 typedef struct
 {
-    bool gate;
+    bool gate, status_hidden;
     uint8_t active_task, edit_task, knock_pos, resets, temp;
     uint32_t delay;
     uint16_t queued;
@@ -77,11 +79,11 @@ void cpb_dbg_get(cpb_dbg_t *out);
 const uint8_t *cpb_dbg_block(uint8_t block);
 
 #define CPB_SST_SIZE ((CPB_BLOCKS - CPB_SLOTS) * CPB_BLOCK_SIZE + CPB_SLOTS + \
-                      CPB_TASKS * CPB_SLOTS + 6 + 8 + 3 + CPB_QUEUE_LEN * 7)
+                      CPB_TASKS * CPB_SLOTS + 7 + 8 + 3 + CPB_QUEUE_LEN * 7)
 void cpb_sst_save(sst_cursor_t *c, unsigned flags);
 bool cpb_sst_load(sst_cursor_t *c, unsigned flags);
 
 #define CPB_DRIVER DRIVER(nul_init, cpb_task, nul_task, nul_run, nul_stop, nul_break, \
-    nul_config, nul_config, SST(CPB_, 1, CPB_SST_SIZE, cpb_sst_save, cpb_sst_load))
+    nul_config, nul_config, SST(CPB_, 2, CPB_SST_SIZE, cpb_sst_save, cpb_sst_load))
 
 #endif /* _CORE_WDC_CPB_H_ */

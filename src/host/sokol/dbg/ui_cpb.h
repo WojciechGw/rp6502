@@ -171,6 +171,7 @@ static void _ui_cpb_status(const cpb_dbg_t *st, uint64_t cpu_pins)
     ImGui::Text("Edit task:    %u", (unsigned)st->edit_task);
     ImGui::Text("Knock:        %.*s (%u/8)", (int)st->knock_pos, "#!RP6502",
                 (unsigned)st->knock_pos);
+    ImGui::Text("Status:       %s ($FED5-$FED7)", st->status_hidden ? "hidden" : "published");
     ImGui::Text("Resets:       %u ($FED5)", (unsigned)st->resets);
     ImGui::Text("Temperature:  %.1f C ($FED6/7 = $%02X)", st->temp / 2.0, (unsigned)st->temp);
     ImGui::Text("Delay:        %u cycles, %u queued", (unsigned)st->delay, (unsigned)st->queued);

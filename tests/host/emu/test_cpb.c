@@ -58,6 +58,13 @@ static void map(uint8_t slot, uint8_t block)
     wr((uint16_t)(CPB_REG_BANK_BASE + slot), block);
 }
 
+static cpb_dbg_t state(void)
+{
+    cpb_dbg_t st;
+    cpb_dbg_get(&st);
+    return st;
+}
+
 UTEST(cpb, the_identity_map_is_the_plain_machine)
 {
     fresh(0);
@@ -174,16 +181,16 @@ UTEST(cpb, the_pinned_slot_is_shared)
 UTEST(cpb, resb_resets_on_its_falling_edge_only)
 {
     fresh(0);
-    uint8_t before = sram[CPB_REG_RESETS];
+    uint8_t before = state().resets;
     knock('+');
     map(16, 100);
     wr(SLOT16, 0xAA);
 
     cpb_resb(true);
-    ASSERT_EQ(sram[CPB_REG_RESETS], (uint8_t)(before + 1));
+    ASSERT_EQ(state().resets, (uint8_t)(before + 1));
     ASSERT_EQ(rd(SLOT16), 0x00);
     cpb_resb(true);
-    ASSERT_EQ(sram[CPB_REG_RESETS], (uint8_t)(before + 1));
+    ASSERT_EQ(state().resets, (uint8_t)(before + 1));
     cpb_resb(false);
 
     map(16, 100);
@@ -193,8 +200,57 @@ UTEST(cpb, resb_resets_on_its_falling_edge_only)
     ASSERT_EQ(rd(SLOT16), 0xAA);
 
     cpb_resb(true);
-    ASSERT_EQ(sram[CPB_REG_RESETS], (uint8_t)(before + 2));
+    ASSERT_EQ(state().resets, (uint8_t)(before + 2));
     cpb_resb(false);
+}
+
+/* The module firmware's test_status_hidden(): a program that never knocks
+ * keeps $FED5 across the loader's resets. */
+UTEST(cpb, the_status_bytes_wait_for_a_knock)
+{
+    fresh(0);
+    cpb_power_on();
+    ASSERT_TRUE(state().status_hidden);
+    for (int i = 0; i < 10; i++)
+    {
+        cpb_resb(true);
+        cpb_resb(false);
+    }
+    ASSERT_EQ(sram[CPB_REG_RESETS], 0);
+    ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 0);
+    wr(CPB_REG_RESETS, 0xC3);
+    for (int i = 0; i < 100; i++)
+    {
+        cpb_resb(true);
+        cpb_resb(false);
+    }
+    ASSERT_EQ(state().resets, 110);
+    ASSERT_EQ(sram[CPB_REG_RESETS], 0xC3);
+
+    knock('B');
+    ASSERT_TRUE(state().status_hidden);
+    ASSERT_EQ(sram[CPB_REG_RESETS], 0xC3);
+
+    knock('+');
+    ASSERT_FALSE(state().status_hidden);
+    ASSERT_EQ(sram[CPB_REG_RESETS], 110);
+    ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 50);
+    ASSERT_EQ(sram[CPB_REG_TEMP_MAX], 50);
+
+    wr(CPB_REG_RESETS, 0x11);
+    knock('+');
+    ASSERT_EQ(sram[CPB_REG_RESETS], 0x11);
+    knock('-');
+    ASSERT_FALSE(state().status_hidden);
+
+    cpb_resb(true);
+    ASSERT_TRUE(state().status_hidden);
+    ASSERT_EQ(sram[CPB_REG_RESETS], 0x11);
+    cpb_resb(false);
+
+    knock('T');
+    ASSERT_FALSE(state().status_hidden);
+    ASSERT_EQ(sram[CPB_REG_RESETS], 111);
 }
 
 UTEST(cpb, no_delay_takes_effect_on_the_next_cycle)
@@ -276,7 +332,11 @@ UTEST(cpb, the_temperature_is_published_and_restored)
     cpb_set_enabled(true);
     cpb_set_delay(0);
     cpb_set_temperature(45.5);
+    memset(sram, 0, sizeof sram);
     cpb_init_memory(false, 0, 0);
+    ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 0);
+    ASSERT_EQ(sram[CPB_REG_TEMP_MAX], 0);
+    knock('T');
     ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 0x5B);
     ASSERT_EQ(sram[CPB_REG_TEMP_MAX], 0x5B);
     wr(CPB_REG_TEMP_MIN, 0);
@@ -293,9 +353,11 @@ UTEST(cpb, the_temperature_saturates)
     cpb_set_enabled(true);
     cpb_set_temperature(200.0);
     cpb_init_memory(false, 0, 0);
+    knock('T');
     ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 0xFF);
     cpb_set_temperature(-3.0);
     cpb_init_memory(false, 0, 0);
+    knock('T');
     ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 0x00);
 }
 
@@ -315,9 +377,13 @@ UTEST(cpb, a_savestate_carries_the_maps)
     knock('-');
     wr(SLOT16, 0x00);
     ASSERT_EQ(rd(SLOT16), 0x00);
+    cpb_resb(true);
+    cpb_resb(false);
+    ASSERT_TRUE(state().status_hidden);
 
     c = (sst_cursor_t){blob, blob + sizeof blob, false};
     ASSERT_TRUE(cpb_sst_load(&c, 0));
+    ASSERT_FALSE(state().status_hidden);
     ASSERT_EQ(rd(SLOT16), 0xAA);
     map(16, 101);
     ASSERT_NE(rd(SLOT16), 0xAA);
@@ -342,7 +408,7 @@ UTEST(cpb, a_power_on_counts_resets_from_zero)
     cpb_resb(true);
     cpb_power_on();
     cpb_resb(true);
-    ASSERT_EQ(sram[CPB_REG_RESETS], 1);
+    ASSERT_EQ(state().resets, 1);
     cpb_resb(false);
 }
 
