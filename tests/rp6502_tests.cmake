@@ -107,6 +107,27 @@ rp6502_test_rom(pcm+opl_or_psg_rom GEN ${RP6502_TESTS_DIR}/gen/pcm+opl_or_psg_ro
     DEPENDS ${RP6502_ROM_GEN}
     COMMENT "Generating the PCM with OPL2 or PSG demo ROM")
 
+set(RIVERRAID_ROM ${RP6502_TEST_ROM_DIR}/riverraid.rp6502)
+rp6502_test_rom(riverraid_rom GEN ${RP6502_TESTS_DIR}/gen/riverraid_rom_gen.py
+    ARGS --emit ${RIVERRAID_ROM}
+    OUTPUTS ${RIVERRAID_ROM}
+    DEPENDS ${RP6502_ROM_GEN}
+    COMMENT "Generating the River Raid music demo ROM")
+
+set(RIVERRAID_GAMEOVER_ROM ${RP6502_TEST_ROM_DIR}/riverraid_gameover.rp6502)
+rp6502_test_rom(riverraid_gameover_rom GEN ${RP6502_TESTS_DIR}/gen/riverraid_gameover_rom_gen.py
+    ARGS --emit ${RIVERRAID_GAMEOVER_ROM}
+    OUTPUTS ${RIVERRAID_GAMEOVER_ROM}
+    DEPENDS ${RP6502_ROM_GEN}
+    COMMENT "Generating the River Raid game-over jingle ROM")
+
+set(RIVERRAID_VICTORY_ROM ${RP6502_TEST_ROM_DIR}/riverraid_victory.rp6502)
+rp6502_test_rom(riverraid_victory_rom GEN ${RP6502_TESTS_DIR}/gen/riverraid_victory_rom_gen.py
+    ARGS --emit ${RIVERRAID_VICTORY_ROM}
+    OUTPUTS ${RIVERRAID_VICTORY_ROM}
+    DEPENDS ${RP6502_ROM_GEN}
+    COMMENT "Generating the River Raid victory jingle ROM")
+
 set(STREAM_ROM ${RP6502_TEST_ROM_DIR}/stream.rp6502)
 rp6502_test_rom(stream_rom GEN ${RP6502_TESTS_DIR}/gen/stream_rom_gen.py
     ARGS --emit ${STREAM_ROM}
