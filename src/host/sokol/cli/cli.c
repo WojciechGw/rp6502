@@ -25,7 +25,6 @@ void cli_options_init(cli_options *o)
     o->frames = 120;
     o->scale = 1.5;
     o->scale_filter = GFX_FILTER_SHARP;
-    o->fill_random = true;
 }
 
 static bool parse_hex_color(const char *s, int *r, int *g, int *b)
@@ -44,9 +43,9 @@ static bool parse_hex_color(const char *s, int *r, int *g, int *b)
     return true;
 }
 
-/* The script's number grammar for the whole command line: $FF and 0xFF are
- * hex and everything else is decimal, because strtol's base 0 would read
- * "010" as eight, which is not what someone typing a byte count means. */
+/* A command-line number: $FF and 0xFF are hex and everything else is
+ * decimal, because strtol's base 0 would read "010" as eight, which is not
+ * what someone typing a byte count means. */
 static bool cli_number(const char *s, long long *out)
 {
     int base = 10;
@@ -68,30 +67,16 @@ static bool cli_bad(const char *opt, const char *value)
     return false;
 }
 
-static bool parse_fill(const char *s, bool *random, uint8_t *value)
-{
-    if (!strcasecmp(s, "random"))
-    {
-        *random = true;
-        return true;
-    }
-    long long v;
-    if (!cli_number(s, &v) || v < 0 || v > 255)
-        return false;
-    *random = false;
-    *value = (uint8_t)v;
-    return true;
-}
 
 /* Long-option codes, above 255 so they cannot collide with a short-option
  * character. */
 enum
 {
     OPT_HELP = 256, OPT_SCREENSHOT, OPT_FRAMES, OPT_SCALE, OPT_FILTER, OPT_SCRIPT,
-    OPT_INSTALL, OPT_SAVE_DIR, OPT_BGCOLOR, OPT_PHI2, OPT_CP, OPT_SEED, OPT_FILL,
+    OPT_INSTALL, OPT_SAVE_DIR, OPT_BGCOLOR, OPT_PHI2, OPT_CP, OPT_MEMSEED, OPT_MEMFILL,
     OPT_MUTE, OPT_DEBUG, OPT_DAP, OPT_CREDITS, OPT_VERSION, OPT_INI,
-    OPT_CRC, OPT_HEADLESS, OPT_STDIN, OPT_CPB, OPT_CPB_TEMP, OPT_CPB_DELAY,
-    OPT_DRIVE, OPT_NO_MIRROR,
+    OPT_CRC, OPT_HEADLESS, OPT_STDIN, OPT_ASPECT, OPT_CPB, OPT_CPB_TEMP,
+    OPT_CPB_DELAY, OPT_DRIVE, OPT_NO_MIRROR,
 };
 static const struct option longopts[] = {
     {"help",         no_argument,       NULL, OPT_HELP},
@@ -100,6 +85,7 @@ static const struct option longopts[] = {
     {"frames",       required_argument, NULL, OPT_FRAMES},
     {"scale",        required_argument, NULL, OPT_SCALE},
     {"filter",       required_argument, NULL, OPT_FILTER},
+    {"aspect",       required_argument, NULL, OPT_ASPECT},
     {"script",       required_argument, NULL, OPT_SCRIPT},
     {"headless",     no_argument,       NULL, OPT_HEADLESS},
     {"stdin",        no_argument,       NULL, OPT_STDIN},
@@ -108,8 +94,8 @@ static const struct option longopts[] = {
     {"bgcolor",      required_argument, NULL, OPT_BGCOLOR},
     {"phi2",         required_argument, NULL, OPT_PHI2},
     {"cp",           required_argument, NULL, OPT_CP},
-    {"seed",         required_argument, NULL, OPT_SEED},
-    {"fill",         required_argument, NULL, OPT_FILL},
+    {"memseed",      required_argument, NULL, OPT_MEMSEED},
+    {"memfill",      required_argument, NULL, OPT_MEMFILL},
     {"mute",         no_argument,       NULL, OPT_MUTE},
     {"debug",        no_argument,       NULL, OPT_DEBUG},
     {"dap",          no_argument,       NULL, OPT_DAP},
@@ -134,6 +120,9 @@ void cli_usage(FILE *out, const char *argv0)
             "  --frames <n>              frames to run before the screenshot or crc (default 120)\n"
             "  --scale <n>               window scale, fractional ok (default 1.5)\n"
             "  --filter <f>              nearest|linear|sharp (default sharp)\n"
+            "  --aspect <a>              4:3|16:9|16:10: a 640x480, 640x360 or 640x400\n"
+            "                            console, and a window that keeps its shape\n"
+            "                            (default: the window takes each canvas's shape)\n"
             "  --script <file>           drive input and check results ('-' = stdin);\n"
             "                            always headless: the script is the only clock\n"
             "  --headless                no window and no picture: host stdin, stdout and\n"
@@ -159,10 +148,10 @@ void cli_usage(FILE *out, const char *argv0)
             "                            0 runs unpaced, warping time\n"
             "  --cp <n>                  OEM code page (437/720/737/771/775/850/852/855/\n"
             "                            857/860-866/869, default 437)\n"
-            "  --seed <n>                fixed RNG seed for reproducible runs\n"
-            "                            (default: host entropy)\n"
-            "  --fill random|<byte>      what RAM and XRAM hold at boot, as $FF or 255\n"
-            "                            (default: random, like the hardware's)\n"
+            "  --memseed <n>             seed of the random RAM and XRAM fill,\n"
+            "                            0-4294967295 (default: host entropy)\n"
+            "  --memfill <byte>          fill RAM and XRAM with one byte, as $FF or 255,\n"
+            "                            in place of the random fill of --memseed\n"
             "  --mute                    mute all audio (no synth, no OS audio device)\n"
             "  --debug                   on-screen machine debugger (CPU/VIA/disasm); holds\n"
             "                            the window open on stop for inspection; no window\n"
@@ -174,7 +163,8 @@ void cli_usage(FILE *out, const char *argv0)
             "                            (ImGui format; e.g. the workspace .rp6502)\n"
             "  --cpb                     a PICO-SRAM-BANKED module in the SRAM socket:\n"
             "                            512 KB in 2 KB banks, 16 task maps; RAM\n"
-            "                            starts zeroed unless --fill is given\n"
+            "                            starts zeroed unless --memfill or --memseed\n"
+            "                            is given\n"
             "  --cpb-temp <C>            its core temperature at $FED6/$FED7\n"
             "                            (0-127.5, default 25)\n"
             "  --cpb-delay <cycles>      PHI2 cycles before a write to $FEDE-$FEFF\n"
@@ -258,6 +248,25 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
                 return 2;
             }
             break;
+        case OPT_ASPECT:
+            /* The console canvas takes the shape asked for at 640 wide, which
+             * holds 30, 22 or 25 rows of 80 columns, and the window keeps
+             * that shape. */
+            if (!strcmp(optarg, "4:3"))
+                o->console_h = 480;
+            else if (!strcmp(optarg, "16:9"))
+                o->console_h = 360;
+            else if (!strcmp(optarg, "16:10"))
+                o->console_h = 400;
+            else
+            {
+                fprintf(stderr, "rp6502-emu: bad --aspect '%s' "
+                                "(want 4:3|16:9|16:10)\n", optarg);
+                return 2;
+            }
+            o->console_w = 640;
+            o->fixed_aspect = true;
+            break;
         case OPT_SCRIPT: o->script = optarg; break;
         case OPT_INSTALL:
         {
@@ -310,24 +319,24 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
             o->code_page = (int)v;
             break;
         }
-        case OPT_SEED:
+        case OPT_MEMSEED:
         {
             long long v;
-            if (!cli_number(optarg, &v) || v < 0)
-                return cli_bad("--seed", optarg), 2;
-            o->seed = (unsigned long long)v;
-            o->have_seed = true;
+            if (!cli_number(optarg, &v) || v < 0 || v > UINT32_MAX)
+                return cli_bad("--memseed", optarg), 2;
+            o->memseed = (uint32_t)v;
+            o->have_memseed = true;
             break;
         }
-        case OPT_FILL:
-            if (!parse_fill(optarg, &o->fill_random, &o->fill_value))
-            {
-                fprintf(stderr, "rp6502-emu: bad --fill '%s' "
-                                "(want random or a byte 0-255)\n", optarg);
-                return 2;
-            }
-            o->have_fill = true;
+        case OPT_MEMFILL:
+        {
+            long long v;
+            if (!cli_number(optarg, &v) || v < 0 || v > 255)
+                return cli_bad("--memfill", optarg), 2;
+            o->memfill = (uint8_t)v;
+            o->have_memfill = true;
             break;
+        }
         case OPT_CPB: o->cpb = true; break;
         case OPT_CPB_TEMP:
         {
@@ -362,6 +371,11 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
             fprintf(stderr, "rp6502-emu: unknown option '%s'\n", argv[optind - 1]);
             return 2;
         }
+    }
+    if (o->have_memseed && o->have_memfill)
+    {
+        fprintf(stderr, "rp6502-emu: --memseed and --memfill cannot both be given\n");
+        return 2;
     }
     if (o->headless)
         o->console = true;

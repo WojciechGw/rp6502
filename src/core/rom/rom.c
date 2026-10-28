@@ -8,7 +8,6 @@
  * loaders.
  */
 
-#include "core/sys/com.h"
 #include "osal/fs.h"
 #include "core/rom/rom.h"
 #include "core/ria/regs.h"
@@ -49,6 +48,14 @@ static void rom_deposit(const rom_record_t *rec, const uint8_t *buf)
     }
 }
 
+/* The console message for the reason that the last rom_load failed. */
+static const char *rom_error;
+
+const char *rom_load_error(void)
+{
+    return rom_error;
+}
+
 bool rom_load(const char *path)
 {
     rom_assets_reset();
@@ -60,7 +67,7 @@ bool rom_load(const char *path)
     int fd = rom_alias_open(path, &err);
     if (fd < 0 || !rom_pump_open_fd(&pump, fd, buf, &err))
     {
-        com_printf("cannot load ROM '%s'\n", path);
+        rom_error = api_errno_str(err);
         return false;
     }
     rom_record_t rec;
@@ -71,7 +78,7 @@ bool rom_load(const char *path)
             continue;
         if (r == ROM_PUMP_ERROR)
         {
-            com_printf("bad ROM record in '%s'\n", path);
+            rom_error = api_errno_str(err);
             rom_pump_close(&pump);
             return false;
         }
@@ -79,7 +86,7 @@ bool rom_load(const char *path)
     }
     if (!rom_pump_complete(&pump))
     {
-        com_printf("ROM has no reset vector ($FFFC/$FFFD)\n");
+        rom_error = S(STR_ERR_ROM_NO_RESET_VECTOR);
         rom_pump_close(&pump);
         return false;
     }
