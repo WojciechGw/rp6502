@@ -39,7 +39,7 @@
 #include "core/term/term.h"
 #include "core/vga/vga_emu.h"
 #include "core/wdc/bus.h"
-#include "core/wdc/cpb.h"
+#include "core/wdc/mtram.h"
 #include "core/wdc/cpu.h"
 #include "core/wdc/via.h"
 #include "core/wdc/phi2.h"
@@ -51,7 +51,7 @@
  * bus_task then runs the 6502 up to it. TERM comes before VGA because
  * vga_init programs the console canvas, which sets the terminal's height. */
 #define RP6502_MACH_DRIVERS                                                  \
-    RIA_DRIVER, SRAM_DRIVER, CPB_DRIVER, XRAM_DRIVER,         \
+    RIA_DRIVER, SRAM_DRIVER, MTRAM_DRIVER, XRAM_DRIVER,         \
     PROC_DRIVER, STR_DRIVER, ASSET_DRIVER,\
     COM_DRIVER, STD_DRIVER, RLN_DRIVER,              \
     API_DRIVER, XREG_DRIVER, TERM_DRIVER,                                 \

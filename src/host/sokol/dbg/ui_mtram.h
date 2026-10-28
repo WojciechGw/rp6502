@@ -5,7 +5,7 @@
  *
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * The debug window of the PICO-SRAM-BANKED module (CPB) in the SRAM socket:
+ * The debug window of the mtRAM module in the SRAM socket:
  * the bus as the module sees it after the last cycle, its control state, the
  * live map, the sixteen task maps, and the 256 blocks with a read-only view of
  * one of them. BA11 to BA18 are not module pins; they are the block the live
@@ -33,7 +33,7 @@ typedef struct
     const char *title;
     int x, y, w, h; /* initial geometry; a 0 width or height takes the default */
     bool open;
-} ui_cpb_desc_t;
+} ui_mtram_desc_t;
 
 typedef struct
 {
@@ -44,13 +44,13 @@ typedef struct
     int sel_task;
     int sel_block;
     ui_chip_t chip;
-} ui_cpb_t;
+} ui_mtram_t;
 
-void ui_cpb_init(ui_cpb_t *win, const ui_cpb_desc_t *desc);
-void ui_cpb_discard(ui_cpb_t *win);
-void ui_cpb_draw(ui_cpb_t *win);
-void ui_cpb_save_settings(ui_cpb_t *win, ui_settings_t *settings);
-void ui_cpb_load_settings(ui_cpb_t *win, const ui_settings_t *settings);
+void ui_mtram_init(ui_mtram_t *win, const ui_mtram_desc_t *desc);
+void ui_mtram_discard(ui_mtram_t *win);
+void ui_mtram_draw(ui_mtram_t *win);
+void ui_mtram_save_settings(ui_mtram_t *win, ui_settings_t *settings);
+void ui_mtram_load_settings(ui_mtram_t *win, const ui_settings_t *settings);
 
 #ifdef __cplusplus
 }
@@ -67,26 +67,26 @@ void ui_cpb_load_settings(ui_cpb_t *win, const ui_settings_t *settings);
 extern "C"
 {
 #include "core/sys/sys.h"
-#include "core/wdc/cpb.h"
+#include "core/wdc/mtram.h"
 #include "core/wdc/cpu.h"
 }
 
-#define UI_CPB_PIN_RWB (1ULL << 24)
-#define UI_CPB_PIN_PHI2 (1ULL << 25)
-#define UI_CPB_PIN_CE2 (1ULL << 26)
-#define UI_CPB_PIN_BA11 (1ULL << 27)
+#define UI_MTRAM_PIN_RWB (1ULL << 24)
+#define UI_MTRAM_PIN_PHI2 (1ULL << 25)
+#define UI_MTRAM_PIN_CE2 (1ULL << 26)
+#define UI_MTRAM_PIN_BA11 (1ULL << 27)
 
-static const ui_chip_pin_t _ui_cpb_pins[] = {
+static const ui_chip_pin_t _ui_mtram_pins[] = {
     {"D0", 0, 1ULL << 16}, {"D1", 1, 1ULL << 17},
     {"D2", 2, 1ULL << 18}, {"D3", 3, 1ULL << 19},
     {"D4", 4, 1ULL << 20}, {"D5", 5, 1ULL << 21},
     {"D6", 6, 1ULL << 22}, {"D7", 7, 1ULL << 23},
-    {"RWB", 9, UI_CPB_PIN_RWB}, {"PHI2", 10, UI_CPB_PIN_PHI2},
-    {"CE2", 11, UI_CPB_PIN_CE2},
-    {"BA11", 13, UI_CPB_PIN_BA11 << 0}, {"BA12", 14, UI_CPB_PIN_BA11 << 1},
-    {"BA13", 15, UI_CPB_PIN_BA11 << 2}, {"BA14", 16, UI_CPB_PIN_BA11 << 3},
-    {"BA15", 17, UI_CPB_PIN_BA11 << 4}, {"BA16", 18, UI_CPB_PIN_BA11 << 5},
-    {"BA17", 19, UI_CPB_PIN_BA11 << 6}, {"BA18", 20, UI_CPB_PIN_BA11 << 7},
+    {"RWB", 9, UI_MTRAM_PIN_RWB}, {"PHI2", 10, UI_MTRAM_PIN_PHI2},
+    {"CE2", 11, UI_MTRAM_PIN_CE2},
+    {"BA11", 13, UI_MTRAM_PIN_BA11 << 0}, {"BA12", 14, UI_MTRAM_PIN_BA11 << 1},
+    {"BA13", 15, UI_MTRAM_PIN_BA11 << 2}, {"BA14", 16, UI_MTRAM_PIN_BA11 << 3},
+    {"BA15", 17, UI_MTRAM_PIN_BA11 << 4}, {"BA16", 18, UI_MTRAM_PIN_BA11 << 5},
+    {"BA17", 19, UI_MTRAM_PIN_BA11 << 6}, {"BA18", 20, UI_MTRAM_PIN_BA11 << 7},
     {"A0", 22, 1ULL << 0}, {"A1", 23, 1ULL << 1},
     {"A2", 24, 1ULL << 2}, {"A3", 25, 1ULL << 3},
     {"A4", 26, 1ULL << 4}, {"A5", 27, 1ULL << 5},
@@ -97,9 +97,9 @@ static const ui_chip_pin_t _ui_cpb_pins[] = {
     {"A14", 36, 1ULL << 14}, {"A15", 37, 1ULL << 15},
 };
 
-#define UI_CPB_REMAPPED ImVec4(1.0f, 0.75f, 0.2f, 1.0f)
+#define UI_MTRAM_REMAPPED ImVec4(1.0f, 0.75f, 0.2f, 1.0f)
 
-void ui_cpb_init(ui_cpb_t *win, const ui_cpb_desc_t *desc)
+void ui_mtram_init(ui_mtram_t *win, const ui_mtram_desc_t *desc)
 {
     CHIPS_ASSERT(win && desc && desc->title);
     memset(win, 0, sizeof(*win));
@@ -111,26 +111,26 @@ void ui_cpb_init(ui_cpb_t *win, const ui_cpb_desc_t *desc)
     win->open = desc->open;
     win->valid = true;
     ui_chip_desc_t cd;
-    UI_CHIP_INIT_DESC(&cd, "CPB", 44, _ui_cpb_pins);
+    UI_CHIP_INIT_DESC(&cd, "mtRAM", 44, _ui_mtram_pins);
     ui_chip_init(&win->chip, &cd);
 }
 
-void ui_cpb_discard(ui_cpb_t *win)
+void ui_mtram_discard(ui_mtram_t *win)
 {
     CHIPS_ASSERT(win && win->valid);
     win->valid = false;
 }
 
-static bool _ui_cpb_map_is_identity(const uint8_t *map)
+static bool _ui_mtram_map_is_identity(const uint8_t *map)
 {
-    for (int s = 0; s < CPB_SLOTS; s++)
+    for (int s = 0; s < MTRAM_SLOTS; s++)
         if (map[s] != s)
             return false;
     return true;
 }
 
 /* One row per slot; a click on the block selects it for the block view. */
-static void _ui_cpb_map_table(ui_cpb_t *win, const char *id, const uint8_t *map)
+static void _ui_mtram_map_table(ui_mtram_t *win, const char *id, const uint8_t *map)
 {
     if (!ImGui::BeginTable(id, 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
                                       ImGuiTableFlags_SizingFixedFit))
@@ -139,21 +139,21 @@ static void _ui_cpb_map_table(ui_cpb_t *win, const char *id, const uint8_t *map)
     ImGui::TableSetupColumn("6502");
     ImGui::TableSetupColumn("Block");
     ImGui::TableHeadersRow();
-    for (int s = 0; s < CPB_SLOTS; s++)
+    for (int s = 0; s < MTRAM_SLOTS; s++)
     {
-        unsigned lo = (unsigned)s << CPB_BLOCK_SHIFT;
+        unsigned lo = (unsigned)s << MTRAM_BLOCK_SHIFT;
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
         ImGui::Text("%2d", s);
         ImGui::TableNextColumn();
-        ImGui::Text("$%04X-$%04X", lo, lo + CPB_BLOCK_SIZE - 1);
+        ImGui::Text("$%04X-$%04X", lo, lo + MTRAM_BLOCK_SIZE - 1);
         ImGui::TableNextColumn();
         char label[16];
         std::snprintf(label, sizeof label, "%3u%s", (unsigned)map[s],
-                      s == CPB_PINNED_SLOT ? " pinned" : "");
+                      s == MTRAM_PINNED_SLOT ? " pinned" : "");
         bool remapped = map[s] != s;
         if (remapped)
-            ImGui::PushStyleColor(ImGuiCol_Text, UI_CPB_REMAPPED);
+            ImGui::PushStyleColor(ImGuiCol_Text, UI_MTRAM_REMAPPED);
         ImGui::PushID(s);
         if (ImGui::Selectable(label, win->sel_block == map[s]))
             win->sel_block = map[s];
@@ -164,7 +164,7 @@ static void _ui_cpb_map_table(ui_cpb_t *win, const char *id, const uint8_t *map)
     ImGui::EndTable();
 }
 
-static void _ui_cpb_status(const cpb_dbg_t *st, uint64_t cpu_pins)
+static void _ui_mtram_status(const mtram_dbg_t *st, uint64_t cpu_pins)
 {
     ImGui::Text("Gate:         %s", st->gate ? "OPEN" : "closed");
     ImGui::Text("Active task:  %u", (unsigned)st->active_task);
@@ -176,27 +176,27 @@ static void _ui_cpb_status(const cpb_dbg_t *st, uint64_t cpu_pins)
     ImGui::Text("Temperature:  %.1f C ($FED6/7 = $%02X)", st->temp / 2.0, (unsigned)st->temp);
     ImGui::Text("Delay:        %u cycles, %u queued", (unsigned)st->delay, (unsigned)st->queued);
     uint16_t addr = (uint16_t)(cpu_pins & 0xFFFF);
-    uint8_t block = st->active_map[addr >> CPB_BLOCK_SHIFT];
-    uint32_t phys = ((uint32_t)block << CPB_BLOCK_SHIFT) | (addr & (CPB_BLOCK_SIZE - 1));
+    uint8_t block = st->active_map[addr >> MTRAM_BLOCK_SHIFT];
+    uint32_t phys = ((uint32_t)block << MTRAM_BLOCK_SHIFT) | (addr & (MTRAM_BLOCK_SIZE - 1));
     ImGui::Text("Bus:          %s $%04X -> block %u, $%05X", (cpu_pins & W65C02_RW) ? "R" : "W",
                 (unsigned)addr, (unsigned)block, (unsigned)phys);
     ImGui::TextDisabled("CE2 is IORQB: NAND(A8..A15), low for $FF00-$FFFF");
 }
 
-static void _ui_cpb_blocks(ui_cpb_t *win, const cpb_dbg_t *st)
+static void _ui_mtram_blocks(ui_mtram_t *win, const mtram_dbg_t *st)
 {
-    bool in_active[CPB_BLOCKS] = {false};
-    bool remapped[CPB_BLOCKS] = {false};
-    bool in_other[CPB_BLOCKS] = {false};
-    for (int s = 0; s < CPB_SLOTS; s++)
+    bool in_active[MTRAM_BLOCKS] = {false};
+    bool remapped[MTRAM_BLOCKS] = {false};
+    bool in_other[MTRAM_BLOCKS] = {false};
+    for (int s = 0; s < MTRAM_SLOTS; s++)
     {
         in_active[st->active_map[s]] = true;
         if (st->active_map[s] != s)
             remapped[st->active_map[s]] = true;
     }
-    for (int t = 0; t < CPB_TASKS; t++)
+    for (int t = 0; t < MTRAM_TASKS; t++)
         if (t != st->active_task)
-            for (int s = 0; s < CPB_SLOTS; s++)
+            for (int s = 0; s < MTRAM_SLOTS; s++)
                 in_other[st->task_map[t][s]] = true;
 
     const ImU32 c_pinned = IM_COL32(90, 130, 220, 255);
@@ -206,7 +206,7 @@ static void _ui_cpb_blocks(ui_cpb_t *win, const cpb_dbg_t *st)
     const ImU32 c_unused = IM_COL32(70, 70, 70, 255);
     const float cell = 16.0f;
     ImDrawList *dl = ImGui::GetWindowDrawList();
-    for (int b = 0; b < CPB_BLOCKS; b++)
+    for (int b = 0; b < MTRAM_BLOCKS; b++)
     {
         if (b % 16)
             ImGui::SameLine(0.0f, 2.0f);
@@ -214,7 +214,7 @@ static void _ui_cpb_blocks(ui_cpb_t *win, const cpb_dbg_t *st)
         ImGui::PushID(b);
         if (ImGui::InvisibleButton("##blk", ImVec2(cell, cell)))
             win->sel_block = b;
-        ImU32 col = b == CPB_PINNED_SLOT ? c_pinned
+        ImU32 col = b == MTRAM_PINNED_SLOT ? c_pinned
                     : remapped[b]        ? c_remapped
                     : in_active[b]       ? c_active
                     : in_other[b]        ? c_other
@@ -225,17 +225,17 @@ static void _ui_cpb_blocks(ui_cpb_t *win, const cpb_dbg_t *st)
         if (ImGui::IsItemHovered())
         {
             ImGui::BeginTooltip();
-            ImGui::Text("Block %d: $%05X-$%05X", b, (unsigned)b << CPB_BLOCK_SHIFT,
-                        ((unsigned)b << CPB_BLOCK_SHIFT) + CPB_BLOCK_SIZE - 1);
+            ImGui::Text("Block %d: $%05X-$%05X", b, (unsigned)b << MTRAM_BLOCK_SHIFT,
+                        ((unsigned)b << MTRAM_BLOCK_SHIFT) + MTRAM_BLOCK_SIZE - 1);
             int shown = 0;
-            for (int t = 0; t < CPB_TASKS; t++)
-                for (int s = 0; s < CPB_SLOTS; s++)
+            for (int t = 0; t < MTRAM_TASKS; t++)
+                for (int s = 0; s < MTRAM_SLOTS; s++)
                     if (st->task_map[t][s] == b && (st->task_map[t][s] != s || t == st->active_task))
                     {
                         if (shown++ < 12)
                             ImGui::Text("task %2d%s slot %2d ($%04X)", t,
                                         t == st->active_task ? "*" : " ", s,
-                                        (unsigned)s << CPB_BLOCK_SHIFT);
+                                        (unsigned)s << MTRAM_BLOCK_SHIFT);
                     }
             if (shown > 12)
                 ImGui::Text("... %d more", shown - 12);
@@ -262,11 +262,11 @@ static void _ui_cpb_blocks(ui_cpb_t *win, const cpb_dbg_t *st)
 
     int b = win->sel_block;
     ImGui::Separator();
-    ImGui::Text("Block %d ($%05X), read-only", b, (unsigned)b << CPB_BLOCK_SHIFT);
-    const uint8_t *data = cpb_dbg_block((uint8_t)b);
-    ImGui::BeginChild("##cpb_hex", ImVec2(0, 220), ImGuiChildFlags_Borders);
+    ImGui::Text("Block %d ($%05X), read-only", b, (unsigned)b << MTRAM_BLOCK_SHIFT);
+    const uint8_t *data = mtram_dbg_block((uint8_t)b);
+    ImGui::BeginChild("##mtram_hex", ImVec2(0, 220), ImGuiChildFlags_Borders);
     ImGuiListClipper clipper;
-    clipper.Begin(CPB_BLOCK_SIZE / 16);
+    clipper.Begin(MTRAM_BLOCK_SIZE / 16);
     while (clipper.Step())
         for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++)
         {
@@ -283,7 +283,7 @@ static void _ui_cpb_blocks(ui_cpb_t *win, const cpb_dbg_t *st)
     ImGui::EndChild();
 }
 
-void ui_cpb_draw(ui_cpb_t *win)
+void ui_mtram_draw(ui_mtram_t *win)
 {
     CHIPS_ASSERT(win && win->valid && win->title);
     if (!win->open)
@@ -292,48 +292,48 @@ void ui_cpb_draw(ui_cpb_t *win)
     ImGui::SetNextWindowSize(ImVec2(win->init_w, win->init_h), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(win->title, &win->open))
     {
-        cpb_dbg_t st;
-        cpb_dbg_get(&st);
+        mtram_dbg_t st;
+        mtram_dbg_get(&st);
         /* The emulator runs whole cycles, so the pins are the data phase of the
          * last one: PHI2 high while the machine runs. */
         uint64_t cpu_pins = cpu_dbg_pins();
         uint16_t addr = (uint16_t)(cpu_pins & 0xFFFF);
         uint64_t p = cpu_pins & 0xFFFFFFull;
         if (cpu_pins & W65C02_RW)
-            p |= UI_CPB_PIN_RWB;
+            p |= UI_MTRAM_PIN_RWB;
         if (sys_running())
-            p |= UI_CPB_PIN_PHI2;
+            p |= UI_MTRAM_PIN_PHI2;
         if (addr < 0xFF00)
-            p |= UI_CPB_PIN_CE2;
-        p |= (uint64_t)st.active_map[addr >> CPB_BLOCK_SHIFT] * UI_CPB_PIN_BA11;
+            p |= UI_MTRAM_PIN_CE2;
+        p |= (uint64_t)st.active_map[addr >> MTRAM_BLOCK_SHIFT] * UI_MTRAM_PIN_BA11;
 
-        ImGui::BeginChild("##cpb_pins", ImVec2(176, 0), ImGuiChildFlags_Borders);
+        ImGui::BeginChild("##mtram_pins", ImVec2(176, 0), ImGuiChildFlags_Borders);
         ui_chip_draw(&win->chip, p);
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::BeginChild("##cpb_state", ImVec2(0, 0), ImGuiChildFlags_Borders);
+        ImGui::BeginChild("##mtram_state", ImVec2(0, 0), ImGuiChildFlags_Borders);
 
         if (ImGui::CollapsingHeader("Status", ImGuiTreeNodeFlags_DefaultOpen))
-            _ui_cpb_status(&st, cpu_pins);
+            _ui_mtram_status(&st, cpu_pins);
 
         if (ImGui::CollapsingHeader("Live map", ImGuiTreeNodeFlags_DefaultOpen))
-            _ui_cpb_map_table(win, "##cpb_live", st.active_map);
+            _ui_mtram_map_table(win, "##mtram_live", st.active_map);
 
         if (ImGui::CollapsingHeader("Task maps"))
         {
             char preview[32];
             std::snprintf(preview, sizeof preview, "Task %d", win->sel_task);
-            if (ImGui::BeginCombo("##cpb_task", preview))
+            if (ImGui::BeginCombo("##mtram_task", preview))
             {
-                for (int t = 0; t < CPB_TASKS; t++)
+                for (int t = 0; t < MTRAM_TASKS; t++)
                 {
                     char item[40];
-                    bool banked = !_ui_cpb_map_is_identity(st.task_map[t]);
+                    bool banked = !_ui_mtram_map_is_identity(st.task_map[t]);
                     std::snprintf(item, sizeof item, "Task %2d%s%s%s", t,
                                   t == st.active_task ? " active" : "",
                                   t == st.edit_task ? " edit" : "", banked ? " banked" : "");
                     if (banked)
-                        ImGui::PushStyleColor(ImGuiCol_Text, UI_CPB_REMAPPED);
+                        ImGui::PushStyleColor(ImGuiCol_Text, UI_MTRAM_REMAPPED);
                     if (ImGui::Selectable(item, win->sel_task == t))
                         win->sel_task = t;
                     if (banked)
@@ -341,24 +341,24 @@ void ui_cpb_draw(ui_cpb_t *win)
                 }
                 ImGui::EndCombo();
             }
-            _ui_cpb_map_table(win, "##cpb_task_map", st.task_map[win->sel_task]);
+            _ui_mtram_map_table(win, "##mtram_task_map", st.task_map[win->sel_task]);
         }
 
         if (ImGui::CollapsingHeader("Blocks", ImGuiTreeNodeFlags_DefaultOpen))
-            _ui_cpb_blocks(win, &st);
+            _ui_mtram_blocks(win, &st);
 
         ImGui::EndChild();
     }
     ImGui::End();
 }
 
-void ui_cpb_save_settings(ui_cpb_t *win, ui_settings_t *settings)
+void ui_mtram_save_settings(ui_mtram_t *win, ui_settings_t *settings)
 {
     CHIPS_ASSERT(win && settings);
     ui_settings_add(settings, win->title, win->open);
 }
 
-void ui_cpb_load_settings(ui_cpb_t *win, const ui_settings_t *settings)
+void ui_mtram_load_settings(ui_mtram_t *win, const ui_settings_t *settings)
 {
     CHIPS_ASSERT(win && settings);
     win->open = ui_settings_isopen(settings, win->title);

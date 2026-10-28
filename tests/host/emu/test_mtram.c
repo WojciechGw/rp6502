@@ -5,11 +5,11 @@
  *
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * The CPB model, driven one bus cycle at a time through sram_tick. The cases
+ * The mtRAM model, driven one bus cycle at a time through sram_tick. The cases
  * follow the module firmware's own tests of its control plane.
  */
 
-#include "core/wdc/cpb.h"
+#include "core/wdc/mtram.h"
 #include "core/wdc/sram.h"
 #include "utest.h"
 #include <string.h>
@@ -20,12 +20,12 @@ UTEST_MAIN();
 
 static void fresh(uint32_t delay)
 {
-    cpb_set_enabled(true);
-    cpb_set_delay(delay);
-    cpb_set_temperature(25.0);
-    cpb_resb(false);
+    mtram_set_enabled(true);
+    mtram_set_delay(delay);
+    mtram_set_temperature(25.0);
+    mtram_resb(false);
     memset(sram, 0, sizeof sram);
-    cpb_init_memory(false, 0, 0);
+    mtram_init_memory(false, 0, 0);
 }
 
 static void wr(uint16_t addr, uint8_t data)
@@ -49,23 +49,23 @@ static void idle(int cycles)
 static void knock(char cmd)
 {
     for (const char *p = "#!RP6502"; *p; p++)
-        wr(CPB_REG_KNOCK, (uint8_t)*p);
-    wr(CPB_REG_KNOCK, (uint8_t)cmd);
+        wr(MTRAM_REG_KNOCK, (uint8_t)*p);
+    wr(MTRAM_REG_KNOCK, (uint8_t)cmd);
 }
 
 static void map(uint8_t slot, uint8_t block)
 {
-    wr((uint16_t)(CPB_REG_BANK_BASE + slot), block);
+    wr((uint16_t)(MTRAM_REG_BANK_BASE + slot), block);
 }
 
-static cpb_dbg_t state(void)
+static mtram_dbg_t state(void)
 {
-    cpb_dbg_t st;
-    cpb_dbg_get(&st);
+    mtram_dbg_t st;
+    mtram_dbg_get(&st);
     return st;
 }
 
-UTEST(cpb, the_identity_map_is_the_plain_machine)
+UTEST(mtram, the_identity_map_is_the_plain_machine)
 {
     fresh(0);
     wr(0x1234, 0x55);
@@ -74,7 +74,7 @@ UTEST(cpb, the_identity_map_is_the_plain_machine)
     ASSERT_EQ(*sram_view(0x1234), 0x55);
 }
 
-UTEST(cpb, a_bank_write_waits_for_the_gate)
+UTEST(mtram, a_bank_write_waits_for_the_gate)
 {
     fresh(0);
     map(16, 100);
@@ -82,12 +82,12 @@ UTEST(cpb, a_bank_write_waits_for_the_gate)
     ASSERT_EQ(sram[SLOT16], 0xAA);
 }
 
-UTEST(cpb, a_slot_maps_to_a_block)
+UTEST(mtram, a_slot_maps_to_a_block)
 {
     fresh(0);
     knock('+');
     map(16, 100);
-    ASSERT_EQ(sram[CPB_REG_BANK_BASE + 16], 100);
+    ASSERT_EQ(sram[MTRAM_REG_BANK_BASE + 16], 100);
     wr(SLOT16, 0xAA);
     ASSERT_EQ(sram[SLOT16], 0x00);
     ASSERT_EQ(rd(SLOT16), 0xAA);
@@ -98,7 +98,7 @@ UTEST(cpb, a_slot_maps_to_a_block)
     ASSERT_EQ(rd(SLOT16), 0xAA);
 }
 
-UTEST(cpb, a_low_block_aliases_the_plain_ram)
+UTEST(mtram, a_low_block_aliases_the_plain_ram)
 {
     fresh(0);
     sram[0x0800] = 0x42;
@@ -107,7 +107,7 @@ UTEST(cpb, a_low_block_aliases_the_plain_ram)
     ASSERT_EQ(rd(SLOT16), 0x42);
 }
 
-UTEST(cpb, block_31_is_refused)
+UTEST(mtram, block_31_is_refused)
 {
     fresh(0);
     knock('+');
@@ -116,27 +116,27 @@ UTEST(cpb, block_31_is_refused)
     ASSERT_EQ(sram[0x2800], 0x77);
 }
 
-UTEST(cpb, a_knock_restarts_on_a_hash)
+UTEST(mtram, a_knock_restarts_on_a_hash)
 {
     fresh(0);
     for (const char *p = "#!RP#!RP6502+"; *p; p++)
-        wr(CPB_REG_KNOCK, (uint8_t)*p);
+        wr(MTRAM_REG_KNOCK, (uint8_t)*p);
     map(16, 100);
     wr(SLOT16, 0xAA);
     ASSERT_EQ(sram[SLOT16], 0x00);
 }
 
-UTEST(cpb, a_wrong_knock_leaves_the_gate_shut)
+UTEST(mtram, a_wrong_knock_leaves_the_gate_shut)
 {
     fresh(0);
     for (const char *p = "#!RP6503+"; *p; p++)
-        wr(CPB_REG_KNOCK, (uint8_t)*p);
+        wr(MTRAM_REG_KNOCK, (uint8_t)*p);
     map(16, 100);
     wr(SLOT16, 0xAA);
     ASSERT_EQ(sram[SLOT16], 0xAA);
 }
 
-UTEST(cpb, a_minus_knock_resets_the_maps_and_shuts_the_gate)
+UTEST(mtram, a_minus_knock_resets_the_maps_and_shuts_the_gate)
 {
     fresh(0);
     knock('+');
@@ -148,37 +148,37 @@ UTEST(cpb, a_minus_knock_resets_the_maps_and_shuts_the_gate)
     ASSERT_EQ(rd(SLOT16), 0x00);
 }
 
-UTEST(cpb, tasks_have_their_own_maps)
+UTEST(mtram, tasks_have_their_own_maps)
 {
     fresh(0);
     knock('+');
-    wr(CPB_REG_EDIT, 1);
+    wr(MTRAM_REG_EDIT, 1);
     map(16, 120);
     wr(SLOT16, 0x11);
     ASSERT_EQ(sram[SLOT16], 0x11);
 
-    wr(CPB_REG_SWAPDONE, 0);
-    wr(CPB_REG_SWITCH, 1);
-    ASSERT_EQ(sram[CPB_REG_SWAPDONE], 1);
+    wr(MTRAM_REG_SWAPDONE, 0);
+    wr(MTRAM_REG_SWITCH, 1);
+    ASSERT_EQ(sram[MTRAM_REG_SWAPDONE], 1);
     ASSERT_EQ(rd(SLOT16), 0x00);
     wr(SLOT16, 0x22);
 
-    wr(CPB_REG_SWITCH, 0);
+    wr(MTRAM_REG_SWITCH, 0);
     ASSERT_EQ(rd(SLOT16), 0x11);
-    wr(CPB_REG_SWITCH, 1);
+    wr(MTRAM_REG_SWITCH, 1);
     ASSERT_EQ(rd(SLOT16), 0x22);
 }
 
-UTEST(cpb, the_pinned_slot_is_shared)
+UTEST(mtram, the_pinned_slot_is_shared)
 {
     fresh(0);
     knock('+');
     wr(0xF900, 0x5A);
-    wr(CPB_REG_SWITCH, 7);
+    wr(MTRAM_REG_SWITCH, 7);
     ASSERT_EQ(rd(0xF900), 0x5A);
 }
 
-UTEST(cpb, resb_resets_on_its_falling_edge_only)
+UTEST(mtram, resb_resets_on_its_falling_edge_only)
 {
     fresh(0);
     uint8_t before = state().resets;
@@ -186,12 +186,12 @@ UTEST(cpb, resb_resets_on_its_falling_edge_only)
     map(16, 100);
     wr(SLOT16, 0xAA);
 
-    cpb_resb(true);
+    mtram_resb(true);
     ASSERT_EQ(state().resets, (uint8_t)(before + 1));
     ASSERT_EQ(rd(SLOT16), 0x00);
-    cpb_resb(true);
+    mtram_resb(true);
     ASSERT_EQ(state().resets, (uint8_t)(before + 1));
-    cpb_resb(false);
+    mtram_resb(false);
 
     map(16, 100);
     ASSERT_EQ(rd(SLOT16), 0x00);
@@ -199,61 +199,61 @@ UTEST(cpb, resb_resets_on_its_falling_edge_only)
     map(16, 100);
     ASSERT_EQ(rd(SLOT16), 0xAA);
 
-    cpb_resb(true);
+    mtram_resb(true);
     ASSERT_EQ(state().resets, (uint8_t)(before + 2));
-    cpb_resb(false);
+    mtram_resb(false);
 }
 
 /* The module firmware's test_status_hidden(): a program that never knocks
  * keeps $FED5 across the loader's resets. */
-UTEST(cpb, the_status_bytes_wait_for_a_knock)
+UTEST(mtram, the_status_bytes_wait_for_a_knock)
 {
     fresh(0);
-    cpb_power_on();
+    mtram_power_on();
     ASSERT_TRUE(state().status_hidden);
     for (int i = 0; i < 10; i++)
     {
-        cpb_resb(true);
-        cpb_resb(false);
+        mtram_resb(true);
+        mtram_resb(false);
     }
-    ASSERT_EQ(sram[CPB_REG_RESETS], 0);
-    ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 0);
-    wr(CPB_REG_RESETS, 0xC3);
+    ASSERT_EQ(sram[MTRAM_REG_RESETS], 0);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 0);
+    wr(MTRAM_REG_RESETS, 0xC3);
     for (int i = 0; i < 100; i++)
     {
-        cpb_resb(true);
-        cpb_resb(false);
+        mtram_resb(true);
+        mtram_resb(false);
     }
     ASSERT_EQ(state().resets, 110);
-    ASSERT_EQ(sram[CPB_REG_RESETS], 0xC3);
+    ASSERT_EQ(sram[MTRAM_REG_RESETS], 0xC3);
 
     knock('B');
     ASSERT_TRUE(state().status_hidden);
-    ASSERT_EQ(sram[CPB_REG_RESETS], 0xC3);
+    ASSERT_EQ(sram[MTRAM_REG_RESETS], 0xC3);
 
     knock('+');
     ASSERT_FALSE(state().status_hidden);
-    ASSERT_EQ(sram[CPB_REG_RESETS], 110);
-    ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 50);
-    ASSERT_EQ(sram[CPB_REG_TEMP_MAX], 50);
+    ASSERT_EQ(sram[MTRAM_REG_RESETS], 110);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 50);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_MAX], 50);
 
-    wr(CPB_REG_RESETS, 0x11);
+    wr(MTRAM_REG_RESETS, 0x11);
     knock('+');
-    ASSERT_EQ(sram[CPB_REG_RESETS], 0x11);
+    ASSERT_EQ(sram[MTRAM_REG_RESETS], 0x11);
     knock('-');
     ASSERT_FALSE(state().status_hidden);
 
-    cpb_resb(true);
+    mtram_resb(true);
     ASSERT_TRUE(state().status_hidden);
-    ASSERT_EQ(sram[CPB_REG_RESETS], 0x11);
-    cpb_resb(false);
+    ASSERT_EQ(sram[MTRAM_REG_RESETS], 0x11);
+    mtram_resb(false);
 
     knock('T');
     ASSERT_FALSE(state().status_hidden);
-    ASSERT_EQ(sram[CPB_REG_RESETS], 111);
+    ASSERT_EQ(sram[MTRAM_REG_RESETS], 111);
 }
 
-UTEST(cpb, no_delay_takes_effect_on_the_next_cycle)
+UTEST(mtram, no_delay_takes_effect_on_the_next_cycle)
 {
     fresh(0);
     sram[SLOT16] = 0x33;
@@ -262,7 +262,7 @@ UTEST(cpb, no_delay_takes_effect_on_the_next_cycle)
     ASSERT_EQ(rd(SLOT16), 0x00);
 }
 
-UTEST(cpb, a_delay_keeps_the_old_map_for_that_many_cycles)
+UTEST(mtram, a_delay_keeps_the_old_map_for_that_many_cycles)
 {
     fresh(5);
     sram[SLOT16] = 0x33;
@@ -274,157 +274,157 @@ UTEST(cpb, a_delay_keeps_the_old_map_for_that_many_cycles)
     ASSERT_EQ(rd(SLOT16), 0x00);
 }
 
-UTEST(cpb, a_delay_keeps_the_order)
+UTEST(mtram, a_delay_keeps_the_order)
 {
     fresh(3);
     knock('+');
-    wr(CPB_REG_EDIT, 1);
+    wr(MTRAM_REG_EDIT, 1);
     map(16, 100);
-    wr(CPB_REG_EDIT, 0);
+    wr(MTRAM_REG_EDIT, 0);
     map(16, 101);
     idle(4);
     wr(SLOT16, 0x01);
-    wr(CPB_REG_SWITCH, 1);
+    wr(MTRAM_REG_SWITCH, 1);
     idle(4);
     wr(SLOT16, 0x02);
-    wr(CPB_REG_SWITCH, 0);
+    wr(MTRAM_REG_SWITCH, 0);
     idle(4);
     ASSERT_EQ(rd(SLOT16), 0x01);
-    wr(CPB_REG_SWITCH, 1);
+    wr(MTRAM_REG_SWITCH, 1);
     idle(4);
     ASSERT_EQ(rd(SLOT16), 0x02);
 }
 
-UTEST(cpb, a_full_queue_loses_nothing)
+UTEST(mtram, a_full_queue_loses_nothing)
 {
     fresh(1000);
     knock('+');
     for (int i = 0; i < 300; i++)
-        wr(CPB_REG_EDIT, (uint8_t)(i & 1));
-    wr(CPB_REG_EDIT, 3);
+        wr(MTRAM_REG_EDIT, (uint8_t)(i & 1));
+    wr(MTRAM_REG_EDIT, 3);
     map(16, 100);
     idle(1001);
-    wr(CPB_REG_SWITCH, 3);
+    wr(MTRAM_REG_SWITCH, 3);
     idle(1001);
     wr(SLOT16, 0x99);
-    wr(CPB_REG_SWITCH, 0);
+    wr(MTRAM_REG_SWITCH, 0);
     idle(1001);
     ASSERT_EQ(rd(SLOT16), 0x00);
-    wr(CPB_REG_SWITCH, 3);
+    wr(MTRAM_REG_SWITCH, 3);
     idle(1001);
     ASSERT_EQ(rd(SLOT16), 0x99);
 }
 
-UTEST(cpb, a_reset_flushes_the_queue_first)
+UTEST(mtram, a_reset_flushes_the_queue_first)
 {
     fresh(1000);
-    wr(CPB_REG_SWAPDONE, 0);
+    wr(MTRAM_REG_SWAPDONE, 0);
     knock('+');
-    wr(CPB_REG_SWITCH, 2);
-    ASSERT_EQ(sram[CPB_REG_SWAPDONE], 0);
-    cpb_resb(true);
-    ASSERT_EQ(sram[CPB_REG_SWAPDONE], 1);
-    cpb_resb(false);
+    wr(MTRAM_REG_SWITCH, 2);
+    ASSERT_EQ(sram[MTRAM_REG_SWAPDONE], 0);
+    mtram_resb(true);
+    ASSERT_EQ(sram[MTRAM_REG_SWAPDONE], 1);
+    mtram_resb(false);
 }
 
-UTEST(cpb, the_temperature_is_published_and_restored)
+UTEST(mtram, the_temperature_is_published_and_restored)
 {
-    cpb_set_enabled(true);
-    cpb_set_delay(0);
-    cpb_set_temperature(45.5);
+    mtram_set_enabled(true);
+    mtram_set_delay(0);
+    mtram_set_temperature(45.5);
     memset(sram, 0, sizeof sram);
-    cpb_init_memory(false, 0, 0);
-    ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 0);
-    ASSERT_EQ(sram[CPB_REG_TEMP_MAX], 0);
+    mtram_init_memory(false, 0, 0);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 0);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_MAX], 0);
     knock('T');
-    ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 0x5B);
-    ASSERT_EQ(sram[CPB_REG_TEMP_MAX], 0x5B);
-    wr(CPB_REG_TEMP_MIN, 0);
-    wr(CPB_REG_TEMP_MAX, 0);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 0x5B);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_MAX], 0x5B);
+    wr(MTRAM_REG_TEMP_MIN, 0);
+    wr(MTRAM_REG_TEMP_MAX, 0);
     knock('T');
-    ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 0x5B);
-    wr(CPB_REG_TEMP_MAX, 0);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 0x5B);
+    wr(MTRAM_REG_TEMP_MAX, 0);
     knock('C');
-    ASSERT_EQ(sram[CPB_REG_TEMP_MAX], 0x5B);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_MAX], 0x5B);
 }
 
-UTEST(cpb, the_temperature_saturates)
+UTEST(mtram, the_temperature_saturates)
 {
-    cpb_set_enabled(true);
-    cpb_set_temperature(200.0);
-    cpb_init_memory(false, 0, 0);
+    mtram_set_enabled(true);
+    mtram_set_temperature(200.0);
+    mtram_init_memory(false, 0, 0);
     knock('T');
-    ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 0xFF);
-    cpb_set_temperature(-3.0);
-    cpb_init_memory(false, 0, 0);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 0xFF);
+    mtram_set_temperature(-3.0);
+    mtram_init_memory(false, 0, 0);
     knock('T');
-    ASSERT_EQ(sram[CPB_REG_TEMP_MIN], 0x00);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 0x00);
 }
 
-UTEST(cpb, a_savestate_carries_the_maps)
+UTEST(mtram, a_savestate_carries_the_maps)
 {
-    static uint8_t blob[CPB_SST_SIZE];
+    static uint8_t blob[MTRAM_SST_SIZE];
     fresh(0);
     knock('+');
     map(16, 100);
     wr(SLOT16, 0xAA);
 
     sst_cursor_t c = {blob, blob + sizeof blob, false};
-    cpb_sst_save(&c, 0);
+    mtram_sst_save(&c, 0);
     ASSERT_TRUE(sst_ok(&c));
     ASSERT_TRUE(c.at == c.end);
 
     knock('-');
     wr(SLOT16, 0x00);
     ASSERT_EQ(rd(SLOT16), 0x00);
-    cpb_resb(true);
-    cpb_resb(false);
+    mtram_resb(true);
+    mtram_resb(false);
     ASSERT_TRUE(state().status_hidden);
 
     c = (sst_cursor_t){blob, blob + sizeof blob, false};
-    ASSERT_TRUE(cpb_sst_load(&c, 0));
+    ASSERT_TRUE(mtram_sst_load(&c, 0));
     ASSERT_FALSE(state().status_hidden);
     ASSERT_EQ(rd(SLOT16), 0xAA);
     map(16, 101);
     ASSERT_NE(rd(SLOT16), 0xAA);
 }
 
-UTEST(cpb, a_savestate_that_aliases_block_31_is_refused)
+UTEST(mtram, a_savestate_that_aliases_block_31_is_refused)
 {
-    static uint8_t blob[CPB_SST_SIZE];
+    static uint8_t blob[MTRAM_SST_SIZE];
     fresh(0);
     sst_cursor_t c = {blob, blob + sizeof blob, false};
-    cpb_sst_save(&c, 0);
-    blob[(CPB_BLOCKS - CPB_SLOTS) * CPB_BLOCK_SIZE + 3] = CPB_PINNED_SLOT;
+    mtram_sst_save(&c, 0);
+    blob[(MTRAM_BLOCKS - MTRAM_SLOTS) * MTRAM_BLOCK_SIZE + 3] = MTRAM_PINNED_SLOT;
     c = (sst_cursor_t){blob, blob + sizeof blob, false};
-    ASSERT_FALSE(cpb_sst_load(&c, 0));
+    ASSERT_FALSE(mtram_sst_load(&c, 0));
 }
 
-UTEST(cpb, a_power_on_counts_resets_from_zero)
+UTEST(mtram, a_power_on_counts_resets_from_zero)
 {
     fresh(0);
-    cpb_resb(true);
-    cpb_resb(false);
-    cpb_resb(true);
-    cpb_power_on();
-    cpb_resb(true);
+    mtram_resb(true);
+    mtram_resb(false);
+    mtram_resb(true);
+    mtram_power_on();
+    mtram_resb(true);
     ASSERT_EQ(state().resets, 1);
-    cpb_resb(false);
+    mtram_resb(false);
 }
 
-UTEST(cpb, the_debugger_sees_the_state)
+UTEST(mtram, the_debugger_sees_the_state)
 {
     fresh(0);
     knock('+');
-    wr(CPB_REG_EDIT, 2);
+    wr(MTRAM_REG_EDIT, 2);
     map(16, 100);
-    wr(CPB_REG_SWITCH, 2);
+    wr(MTRAM_REG_SWITCH, 2);
     wr(SLOT16, 0xAA);
     for (const char *p = "#!RP"; *p; p++)
-        wr(CPB_REG_KNOCK, (uint8_t)*p);
+        wr(MTRAM_REG_KNOCK, (uint8_t)*p);
 
-    cpb_dbg_t st;
-    cpb_dbg_get(&st);
+    mtram_dbg_t st;
+    mtram_dbg_get(&st);
     ASSERT_TRUE(st.gate);
     ASSERT_EQ(st.active_task, 2);
     ASSERT_EQ(st.edit_task, 2);
@@ -433,14 +433,14 @@ UTEST(cpb, the_debugger_sees_the_state)
     ASSERT_EQ(st.active_map[16], 100);
     ASSERT_EQ(st.task_map[2][16], 100);
     ASSERT_EQ(st.task_map[0][16], 16);
-    ASSERT_EQ(cpb_dbg_block(100)[0], 0xAA);
-    ASSERT_TRUE(cpb_dbg_block(16) == &sram[SLOT16]);
+    ASSERT_EQ(mtram_dbg_block(100)[0], 0xAA);
+    ASSERT_TRUE(mtram_dbg_block(16) == &sram[SLOT16]);
 }
 
-UTEST(cpb, off_is_the_plain_machine)
+UTEST(mtram, off_is_the_plain_machine)
 {
     fresh(0);
-    cpb_set_enabled(false);
+    mtram_set_enabled(false);
     knock('+');
     map(16, 100);
     wr(SLOT16, 0xAA);

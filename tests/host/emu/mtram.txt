@@ -1,4 +1,4 @@
-# Run with --cpb --cpb-temp 45.5. Each task sees its own block at $8000, and
+# Run with --mtram --mtram-temp 45.5. Each task sees its own block at $8000, and
 # the program halts with task 1 live, so the script's view of $8000 goes
 # through task 1's map.
 

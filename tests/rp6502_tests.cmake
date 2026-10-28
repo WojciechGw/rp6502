@@ -117,7 +117,7 @@ rp6502_test_roms(probe_roms host/pocket/probe.py probe)
 rp6502_test_roms(sleepasset_roms host/pocket/sleepasset.py
     sleepasset-a sleepasset-b)
 rp6502_test_roms(sleepfile_roms host/pocket/sleepfile.py sleepfile)
-rp6502_test_roms(cpb_roms host/emu/cpb.py cpb)
+rp6502_test_roms(mtram_roms host/emu/mtram.py mtram)
 rp6502_test_roms(msc_drive_roms host/emu/msc_drive.py msc_drive)
 
 # rp6502_add_script_test(NAME <name> COMMAND <file> [<arg>...]

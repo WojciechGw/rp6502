@@ -49,11 +49,11 @@ typedef struct
     bool have_memseed;
     uint8_t memfill;
     bool have_memfill;
-    bool cpb;
-    double cpb_temp;
-    bool have_cpb_temp;
-    uint32_t cpb_delay;
-    bool have_cpb_delay;
+    bool mtram;
+    double mtram_temp;
+    bool have_mtram_temp;
+    uint32_t mtram_delay;
+    bool have_mtram_delay;
     char **rom_args; /* the words after "--"; NULL when none was given */
     int n_rom_args;
 } cli_options;

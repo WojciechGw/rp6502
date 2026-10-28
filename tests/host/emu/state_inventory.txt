@@ -268,25 +268,25 @@ core/wdc/bus.c bus_owed: the BUS chunk
 core/wdc/bus.c bus_read: the BUS chunk
 core/wdc/bus.c bus_ria_irq: the BUS chunk
 core/wdc/bus.c bus_via_irq: the BUS chunk
-core/wdc/cpb.c cpb_active_map: the CPB_ chunk
-core/wdc/cpb.c cpb_active_task: the CPB_ chunk
-core/wdc/cpb.c cpb_cycle: the CPB_ chunk
-core/wdc/cpb.c cpb_delay: not carried: a session's CPB setting
-core/wdc/cpb.c cpb_edit_task: the CPB_ chunk
-core/wdc/cpb.c cpb_ext: the CPB_ chunk
-core/wdc/cpb.c cpb_gate: the CPB_ chunk
-core/wdc/cpb.c cpb_knock_pos: the CPB_ chunk
-core/wdc/cpb.c cpb_on: not carried: a session's CPB setting
-core/wdc/cpb.c cpb_queue: the CPB_ chunk
-core/wdc/cpb.c cpb_queue_count: the CPB_ chunk
-core/wdc/cpb.c cpb_queue_head: the CPB_ chunk
-core/wdc/cpb.c cpb_resb_low: the CPB_ chunk
-core/wdc/cpb.c cpb_resets: the CPB_ chunk
-core/wdc/cpb.c cpb_slot: derived: the CPB_ chunk's load rebuilds it from the active map
-core/wdc/cpb.c cpb_status_hidden: the CPB_ chunk
-core/wdc/cpb.c cpb_task_map: the CPB_ chunk
-core/wdc/cpb.c cpb_temp: not carried: a session's CPB setting
-core/wdc/cpb.c cpb_temp_cycle: the CPB_ chunk
+core/wdc/mtram.c mtram_active_map: the MTRM chunk
+core/wdc/mtram.c mtram_active_task: the MTRM chunk
+core/wdc/mtram.c mtram_cycle: the MTRM chunk
+core/wdc/mtram.c mtram_delay: not carried: a session's mtRAM setting
+core/wdc/mtram.c mtram_edit_task: the MTRM chunk
+core/wdc/mtram.c mtram_ext: the MTRM chunk
+core/wdc/mtram.c mtram_gate: the MTRM chunk
+core/wdc/mtram.c mtram_knock_pos: the MTRM chunk
+core/wdc/mtram.c mtram_on: not carried: a session's mtRAM setting
+core/wdc/mtram.c mtram_queue: the MTRM chunk
+core/wdc/mtram.c mtram_queue_count: the MTRM chunk
+core/wdc/mtram.c mtram_queue_head: the MTRM chunk
+core/wdc/mtram.c mtram_resb_low: the MTRM chunk
+core/wdc/mtram.c mtram_resets: the MTRM chunk
+core/wdc/mtram.c mtram_slot: derived: the MTRM chunk's load rebuilds it from the active map
+core/wdc/mtram.c mtram_status_hidden: the MTRM chunk
+core/wdc/mtram.c mtram_task_map: the MTRM chunk
+core/wdc/mtram.c mtram_temp: not carried: a session's mtRAM setting
+core/wdc/mtram.c mtram_temp_cycle: the MTRM chunk
 core/wdc/cpu.c cpu: the CPU chunk
 core/wdc/cpu.c cpu_dbg_cycle_cb: the CPU chunk
 core/wdc/cpu.c pins: the CPU chunk

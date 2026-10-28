@@ -24,7 +24,7 @@
 #include "osal/fs.h"
 #include "osal/vol.h"
 #include "core/wdc/sram.h"
-#include "core/wdc/cpb.h"
+#include "core/wdc/mtram.h"
 #include "core/sys/xram.h"
 #include "core/wdc/phi2.h"
 #include "core/vga/vga_emu.h"
@@ -184,9 +184,9 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    if ((o.have_cpb_temp || o.have_cpb_delay) && !o.cpb)
+    if ((o.have_mtram_temp || o.have_mtram_delay) && !o.mtram)
     {
-        fprintf(stderr, "rp6502-emu: --cpb-temp and --cpb-delay need --cpb\n");
+        fprintf(stderr, "rp6502-emu: --mtram-temp and --mtram-delay need --mtram\n");
         return 2;
     }
     /* Under --headless and --stdin the host's streams are the program's own,
@@ -223,15 +223,15 @@ int main(int argc, char **argv)
      * the first frame. */
     if (o.fixed_aspect)
         vga_set_console_size(o.console_w, o.console_h);
-    cpb_set_enabled(o.cpb);
-    if (o.have_cpb_temp)
-        cpb_set_temperature(o.cpb_temp);
-    cpb_set_delay(o.cpb_delay);
+    mtram_set_enabled(o.mtram);
+    if (o.have_mtram_temp)
+        mtram_set_temperature(o.mtram_temp);
+    mtram_set_delay(o.mtram_delay);
     /* Set before sys_init, which is where sram_init and xram_init fill. The
-     * CPB module zeroes its whole backing store at power-on unless a fill is
+     * mtRAM module zeroes its whole backing store at power-on unless a fill is
      * asked for; XRAM is the RIA's and keeps the default. */
     uint32_t memseed = o.have_memseed ? o.memseed : os_random();
-    if (o.cpb && !o.have_memfill && !o.have_memseed)
+    if (o.mtram && !o.have_memfill && !o.have_memseed)
         sram_set_fill(false, 0, memseed);
     else
         sram_set_fill(!o.have_memfill, o.memfill, memseed);

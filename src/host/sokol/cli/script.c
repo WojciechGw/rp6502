@@ -761,7 +761,7 @@ static uint8_t script_peek(script_space_t space, uint16_t addr)
 
 /* A plain poke sets what a read finds. bus: stores the way the 6502 does, so
  * a register does what a store to it does, and RAM takes every byte through
- * sram_tick, which a CPB's registers answer too. */
+ * sram_tick, which an mtRAM's registers answer too. */
 static void script_poke(script_space_t space, uint16_t addr, uint8_t value)
 {
     if (space == SCRIPT_XRAM)

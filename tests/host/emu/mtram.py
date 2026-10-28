@@ -5,7 +5,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""A program for rp6502-emu --cpb: it opens the PICO-SRAM-BANKED control
+"""A program for rp6502-emu --mtram: it opens the mtRAM control
 gate, gives slot 16 ($8000) a different block in tasks 0 and 1, switches
 between them, and reports what each task reads there, the core temperature
 and the reset count. It halts with task 1 live, so a script can check the
@@ -70,5 +70,5 @@ def build():
     return p
 
 
-ROMS = {"cpb": build}
+ROMS = {"mtram": build}
 main(globals())
