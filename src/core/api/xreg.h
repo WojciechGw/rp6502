@@ -26,8 +26,8 @@ extern "C"
 {
 #endif
 
-    bool xreg0(uint8_t channel, uint8_t address, uint16_t word);
-    bool xreg1(uint8_t channel, uint8_t address, uint16_t word);
+    bool xreg0(uint8_t channel, uint8_t index, uint16_t word);
+    bool xreg1(uint8_t channel, uint8_t index, uint16_t word);
 
 #ifdef __cplusplus
 }
@@ -40,6 +40,10 @@ extern "C"
 #define XREG_SST_SIZE 32
 void xreg_sst_save(sst_cursor_t *c, unsigned flags);
 bool xreg_sst_load(sst_cursor_t *c, unsigned flags);
+
+/* Drops the staging registers, as a CANVAS or MODE write does after consuming
+ * them. */
+void xreg1_clear(void);
 
 #define XREG_DRIVER DRIVER(nul_init, nul_task, nul_task, nul_run, nul_stop, nul_break, \
     nul_config, nul_config, SST(XREG, 1, XREG_SST_SIZE, xreg_sst_save, xreg_sst_load))
