@@ -64,7 +64,7 @@ extern "C"
 #include "chips/ui/ui_dasm.h"        /* after w65c02dasm.h (impl calls w65c02dasm_op) */
 #include "chips/ui/ui_w65c02.h"      /* CPU register window */
 #include "host/sokol/dbg/ui_ria.h"  /* our RIA debug window (bespoke, not a chips fork) */
-#include "host/sokol/dbg/ui_ini.h"  /* dummy elements: [RP6502][Launch] + [Window][Manager] */
+#include "host/sokol/dbg/ui_ini.h"  /* dummy elements: [RP6502][PICO] + [Window][Manager] */
 #include "chips/ui/ui_m6522.h"
 #include "chips/ui/ui_dbg.h"         /* disassembly/breakpoints */
 
@@ -445,7 +445,7 @@ static const ui_chip_pin_t pins_6522[] = {
 /* ---- Layout persistence: the config file is owned by ImGui's settings system.
  * Two custom ImGuiSettingsHandlers (registered in dbgui_init) ride in that ini:
  *   [Chips][<window title>]  IsOpen=1  — per-window open flags (chips ui_settings_t)
- *   [RP6502][Launch] + [Window][Manager] entry — ui_ini.h's elements
+ *   [RP6502][PICO] + [Window][Manager] entry — ui_ini.h's elements
  * Window geometry rides in ImGui's built-in [Window] handler; the menu bar (below)
  * just toggles each window's open flag. ---- */
 static ui_settings_t g_settings;
@@ -541,7 +541,7 @@ static void rp6502ui_ini_writeall(ImGuiContext *, ImGuiSettingsHandler *handler,
     buf->appendf("[%s][Scale]\nScale=%g\n\n", handler->TypeName, g_ui_scale);
 }
 
-/* The [RP6502][Launch] block and the dummy [Window][Manager] entry ride in
+/* The [RP6502][PICO] block and the dummy [Window][Manager] entry ride in
  * ui_ini.h's elements. */
 static ui_ini_t g_ini;
 
@@ -748,7 +748,7 @@ static void dbgui_build_memmap(void)
     g_memmap_seg_gen = dbg_segments_generation();
 }
 
-void dbgui_init(void)
+void dbgui_init(float display_scale)
 {
     if (g_inited)
         return;
@@ -765,8 +765,17 @@ void dbgui_init(void)
      * from a pristine base (before the layout load below, which may set the scale). */
     g_style_base = ImGui::GetStyle();
     g_style_base_valid = true;
-    /* Pixel-perfect ProggyClean at its native 13px; the overlay renders 1:1 (see
-     * dbgui_new_frame / window.c) so it is never magnified/blurred. */
+    /* The UI scale starts from the display's, and a scale saved in the layout,
+     * loaded below, takes its place. The bitmap font is sharp only at whole
+     * multiples, so the choice is 1.0x or 2.0x. Halfway between them, as a
+     * ratio, is a scale of 1.41, and 1.5 is the first scale an OS offers past
+     * that, so from there 2.0x is the closer of the two. */
+    g_ui_scale = display_scale >= 1.5f ? 2.0f : 1.0f;
+    dbgui_apply_ui_scale();
+    /* ProggyClean, 13 px at 1.0x. dbgui_new_frame sizes it from the UI scale
+     * each frame, and app_frame renders the overlay at a dpi_scale of 1.0, so
+     * at a whole-multiple UI scale each glyph texel lands on one framebuffer
+     * pixel. */
     ImGui::GetIO().Fonts->AddFontDefaultBitmap();
 
     /* Static icon for the Credits masthead: pixels at creation, no
@@ -1227,15 +1236,21 @@ void dbgui_tick(uint64_t pins)
 
 /* Height (in ImGui points) of the main menu bar this overlay draws across the
  * top of the window, captured during dbgui_draw. The window layer reserves this
- * strip (scaled to framebuffer pixels by the DPI factor) so the menu no longer
- * covers the emulated canvas. 0 until the first dbgui_draw runs. */
+ * strip (already framebuffer pixels, since app_frame gives the overlay a
+ * dpi_scale of 1.0) so the menu no longer covers the emulated canvas. 0 until
+ * the first dbgui_draw runs. */
 float dbgui_menu_height(void) { return g_inited ? g_menu_h : 0.0f; }
 
-/* Pre-first-frame estimate of the menu-bar height (ImGui points), so the window
- * can open tall enough for the bar before any frame has measured it. simgui's
- * default font bakes at 13 px; the bar is FontSize + FramePadding.y*2 (3*2) = 19,
- * measured to the pixel on the actual UI. dbgui_menu_height takes over once the
- * bar is drawn. */
+/* Pre-first-frame estimate of the menu-bar height, so the window can open tall
+ * enough for the bar before any frame has measured it. ProggyClean is 13 px at
+ * 1.0x, and the bar is FontSize + FramePadding.y*2 (3*2) = 19 there, measured
+ * to the pixel on the actual UI; the UI scale multiplies both. The window is
+ * sized in sokol's logical units before the display's scale is known, and the
+ * bar is 19 * ui_scale / dpi_scale of them. That is 19 on a display at 1x or
+ * 2x with the UI scale dbgui_init seeds, and a few off at other display scales
+ * or when a saved scale differs from the seed, as an older layout's 1.0x does
+ * with --scale on a 2x display.
+ * dbgui_menu_height takes over once the bar is drawn. */
 float dbgui_menu_bar_estimate(void) { return 19.0f; }
 
 bool dbgui_handle_event(const void *evp)

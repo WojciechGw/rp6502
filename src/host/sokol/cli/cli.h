@@ -28,6 +28,8 @@ typedef struct
     double scale;
     bool have_scale;
     gfx_filter_t scale_filter;
+    int console_w, console_h; /* --aspect; set only with fixed_aspect */
+    bool fixed_aspect;        /* --aspect: the window keeps the console's shape */
     int phi2_khz;  /* 0 leaves the machine's default */
     int code_page; /* 0 leaves the machine's default */
     bool crc;
@@ -40,10 +42,10 @@ typedef struct
     bool credits;
     bool version;
     const char *ini;
-    unsigned long long seed;
-    bool have_seed;
-    bool fill_random;
-    uint8_t fill_value;
+    uint32_t memseed;
+    bool have_memseed;
+    uint8_t memfill;
+    bool have_memfill;
     char **rom_args; /* the words after "--"; NULL when none was given */
     int n_rom_args;
 } cli_options;

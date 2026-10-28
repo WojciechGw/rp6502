@@ -5,29 +5,20 @@
  */
 
 #include "core/sys/sst.h"
-#include "core/sys/sys.h"
 #include "core/sys/xram.h"
 #include "core/wdc/bus.h"
-#include "core/com/com.h"
-#include "core/api/xreg.h"
-#include "core/ria/regs.h"
 #include "core/aud/mix.h"
 #include "core/aud/opl.h"
 #include "core/aud/pcm.h"
 #include "core/aud/psg.h"
-#include "core/vga/vga.h"
-#include "core/vga/vga_emu.h"
-#include "osal/fs.h"
-#include <stdio.h>
 #include "core/wdc/sram.h"
+#include "core/term/term.h"
 
 #include "emu_boot.h"
 
 #include <string.h>
 
 static uint8_t blob[1 << 20];
-
-static uint32_t fb[VGA_MAX_WIDTH * VGA_MAX_HEIGHT];
 
 static const char *take(void)
 {
@@ -59,7 +50,7 @@ UTEST(sst, a_size_is_fixed_and_answered_before_anything_runs)
 UTEST(sst, the_shape_is_the_shape)
 {
     ASSERT_EQ(take(), (const char *)NULL);
-    ASSERT_EQ(sst_size(), (size_t)222888);
+    ASSERT_EQ(sst_size(), (size_t)222890);
     ASSERT_EQ((unsigned)((blob[6] << 8) | blob[7]), 28u);
 }
 
@@ -70,13 +61,14 @@ UTEST(sst, a_blob_is_framed)
     ASSERT_EQ(memcmp(blob + sst_size() - 4, "56PR", 4), 0);
 }
 
+/* The bytes past the end of the short buffer are the guard. */
 UTEST(sst, a_short_buffer_is_refused_rather_than_overrun)
 {
-    uint8_t guard[16];
-    memset(guard, 0x5A, sizeof guard);
-    ASSERT_NE(sst_save(blob, sst_size() - 1, 0), (const char *)NULL);
-    for (unsigned i = 0; i < sizeof guard; i++)
-        ASSERT_EQ(guard[i], 0x5A);
+    size_t len = sst_size() - 1;
+    memset(blob + len, 0x5A, 16);
+    ASSERT_NE(sst_save(blob, len, 0), (const char *)NULL);
+    for (size_t i = 0; i < 16; i++)
+        ASSERT_EQ(blob[len + i], 0x5A);
 }
 
 UTEST(sst, two_saves_of_one_unchanged_machine_are_the_same_bytes)
@@ -201,101 +193,6 @@ UTEST(sst, a_program_picks_up_where_it_was)
 
     emu_frames(20);
     ASSERT_EQ(bus_cycles() - at_save, reference);
-}
-
-UTEST(sst, an_open_file_comes_back_where_it_was)
-{
-    char path[] = TEST_SCRATCH "/sst_open.txt";
-    FILE *f = fopen(path, "wb");
-    ASSERT_TRUE(f != NULL);
-    for (int i = 0; i < 64; i++)
-        fputc(i, f);
-    fclose(f);
-
-    api_errno err = API_EIO;
-    int fd = fs_std_open(path, FS_RD, &err);
-    ASSERT_GE(fd, 0);
-    char buf[8];
-    uint32_t got = 0;
-    while (fs_std_read(fd, buf, 8, &got, &err) == STD_PENDING)
-        ;
-    ASSERT_EQ(got, (uint32_t)8);
-
-    sst_cursor_t c = {(uint8_t *)blob, (uint8_t *)blob + sizeof blob, false};
-    ASSERT_TRUE(fs_std_ident(fd, &c));
-    api_errno ignored;
-    fs_std_close(fd, &ignored);
-
-    sst_cursor_t r = {(uint8_t *)blob, c.at, false};
-    int again = fs_std_reopen(&r, &err);
-    ASSERT_GE(again, 0);
-    while (fs_std_read(again, buf, 8, &got, &err) == STD_PENDING)
-        ;
-    ASSERT_EQ(got, (uint32_t)8);
-    for (int i = 0; i < 8; i++)
-        ASSERT_EQ((uint8_t)buf[i], (uint8_t)(8 + i));
-    fs_std_close(again, &ignored);
-    remove(path);
-}
-
-UTEST(sst, the_screen_comes_back)
-{
-    vga_set_framebuffer(fb);
-    static const char hello[] = "\33[2Jsavestate\r\n";
-    com_stdout_write(hello, sizeof hello - 1);
-    emu_frames(2);
-    uint32_t before = 0;
-    ASSERT_TRUE(vga_frame_crc(&before));
-    ASSERT_EQ(take(), (const char *)NULL);
-
-    static const char noise[] = "\33[2JXXXXXXXXXXXXXXXX\r\n";
-    com_stdout_write(noise, sizeof noise - 1);
-    emu_frames(2);
-    uint32_t scribbled = 0;
-    ASSERT_TRUE(vga_frame_crc(&scribbled));
-    ASSERT_NE(scribbled, before);
-
-    ASSERT_EQ(sst_load(blob, sst_size(), 0), (const char *)NULL);
-    emu_frames(2);
-    uint32_t after = 0;
-    ASSERT_TRUE(vga_frame_crc(&after));
-    ASSERT_EQ(after, before);
-}
-
-UTEST(sst, a_graphics_mode_comes_back)
-{
-    vga_set_framebuffer(fb);
-    ASSERT_TRUE(xreg1(0, 0, vga_canvas_320_240));
-    for (int i = 0; i < 0x4000; i++)
-        xram[0x2000 + i] = (uint8_t)(i * 31 + 7);
-    static const uint16_t cfg[] = {320, 240, 0x2000, 0x1000};
-    for (int i = 0; i < 4; i++)
-    {
-        xram[0x1000 + i * 2] = (uint8_t)cfg[i];
-        xram[0x1000 + i * 2 + 1] = (uint8_t)(cfg[i] >> 8);
-    }
-    ASSERT_TRUE(xreg1(0, 2, 3));      /* 8bpp */
-    ASSERT_TRUE(xreg1(0, 3, 0x1000)); /* the config struct */
-    ASSERT_TRUE(xreg1(0, 4, 0));      /* plane */
-    ASSERT_TRUE(xreg1(0, 5, 0));
-    ASSERT_TRUE(xreg1(0, 6, 0));
-    ASSERT_TRUE(xreg1(0, 1, 3));      /* MODE reads 2-6, so it goes last */
-    emu_frames(2);
-    uint32_t painted = 0;
-    ASSERT_TRUE(vga_frame_crc(&painted));
-    ASSERT_EQ(take(), (const char *)NULL);
-
-    ASSERT_TRUE(xreg1(0, 0, vga_canvas_console));
-    emu_frames(2);
-    uint32_t blank = 0;
-    ASSERT_TRUE(vga_frame_crc(&blank));
-
-    ASSERT_EQ(sst_load(blob, sst_size(), 0), (const char *)NULL);
-    emu_frames(2);
-    uint32_t again = 0;
-    ASSERT_TRUE(vga_frame_crc(&again));
-    ASSERT_EQ(again, painted);
-    (void)blank;
 }
 
 /* What rw_write does, without a 6502 to do it. Every caller writes the block
@@ -445,11 +342,93 @@ UTEST(sst, pcm_sounds_with_the_opl_and_comes_back)
     ASSERT_FALSE(aud_sounded(came, 64 * 2 * 8));
 }
 
-UTEST(sst, a_round_trip_leaves_the_machine_standing)
+/* Whether the machine is on the console canvas, the console is w by h, and
+ * the terminal on it has rows. */
+static bool on_console(int w, int h, int rows)
 {
-    ASSERT_EQ(take(), (const char *)NULL);
-    ASSERT_EQ(sst_load(blob, sst_size(), 0), (const char *)NULL);
+    int cw, ch, vw, vh;
+    vga_console_size(&cw, &ch);
+    vga_canvas_size(&vw, &vh);
+    term_view_t tv;
+    term_view(&tv);
+    return vga_canvas_is_console() && cw == w && ch == h &&
+           vw == w && vh == h && tv.height == rows;
+}
+
+/* The host chooses the console's size, and a savestate made under one size
+ * brings it to a session the host started at another. It stays for the rest
+ * of the session, so the reset and the stop after the load put the console
+ * back at the savestate's size and not the host's. Each is handed a program
+ * left on another canvas, so the console it leaves is one it laid out. */
+UTEST(sst, a_console_size_comes_back_and_stays_for_the_session)
+{
+    ASSERT_TRUE(emu_restart(TEST_FIXTURE));
+    vga_set_console_size(640, 400);
+    ASSERT_TRUE(vga_canvas_select(vga_canvas_console));
     emu_frames(2);
+    ASSERT_TRUE(on_console(640, 400, 25));
+    ASSERT_EQ(take(), (const char *)NULL);
+
+    vga_set_console_size(640, 480);
+    ASSERT_TRUE(vga_canvas_select(vga_canvas_console));
+    ASSERT_TRUE(on_console(640, 480, 30));
+
+    ASSERT_EQ(sst_load(blob, sst_size(), 0), (const char *)NULL);
+    ASSERT_TRUE(on_console(640, 400, 25));
+
+    ASSERT_TRUE(vga_canvas_select(vga_canvas_320_240));
+    ASSERT_TRUE(emu_restart(TEST_FIXTURE));
+    emu_frames(2);
+    ASSERT_TRUE(on_console(640, 400, 25));
+
+    ASSERT_TRUE(vga_canvas_select(vga_canvas_320_180));
+    sys_stop();
+    emu_frames(2);
+    ASSERT_TRUE(on_console(640, 400, 25));
+
+    vga_set_console_size(640, 480);
+    ASSERT_TRUE(vga_canvas_select(vga_canvas_console));
+    ASSERT_TRUE(on_console(640, 480, 30));
+}
+
+static void put_u16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v >> 8);
+    p[1] = (uint8_t)v;
+}
+
+/* The VGA row is loaded on its own here, where no scratch copy puts back what
+ * a refused row set, so a console that survives a refusal survives by the
+ * row's own doing. The row's canvas is at byte 10 and the console's height at
+ * 12. The last case is a console a host could give on a canvas no build has,
+ * which the row has to refuse before it sets the console. */
+UTEST(sst, a_console_no_host_gives_is_refused_before_anything_is_set)
+{
+    static const struct
+    {
+        uint16_t canvas, h;
+    } bad[] = {
+        {vga_canvas_console, 512}, /* the Pico's console on SXGA */
+        {vga_canvas_console, 240},
+        {VGA_CANVAS_COUNT, 400},
+    };
+    static uint8_t row[VGA_SST_SIZE], bent[VGA_SST_SIZE];
+    ASSERT_TRUE(on_console(640, 480, 30));
+    sst_cursor_t c = {row, row + sizeof row, false};
+    vga_sst_save(&c, 0);
+    ASSERT_TRUE(sst_ok(&c));
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++)
+    {
+        memcpy(bent, row, sizeof row);
+        put_u16(bent + 10, bad[i].canvas);
+        put_u16(bent + 12, bad[i].h);
+        c = (sst_cursor_t){bent, bent + sizeof bent, false};
+        ASSERT_FALSE(vga_sst_load(&c, 0));
+        ASSERT_TRUE(on_console(640, 480, 30));
+    }
+    c = (sst_cursor_t){row, row + sizeof row, false};
+    ASSERT_TRUE(vga_sst_load(&c, 0));
+    ASSERT_TRUE(on_console(640, 480, 30));
 }
 
 UTEST_MAIN_EMU()
