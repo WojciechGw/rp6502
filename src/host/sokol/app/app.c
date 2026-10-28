@@ -36,7 +36,7 @@
 #include "core/sys/proc.h"
 #include "core/api/api.h"
 #include "core/api/proc.h"
-#include "core/wdc/cpb.h"
+#include "core/wdc/mtram.h"
 #include "core/sys/com.h"
 #include "core/str/oem.h"
 #include "core/hid/vtkeys.h"
@@ -449,12 +449,12 @@ static bool app_boot_again(unsigned flags)
     return true;
 }
 
-/* A cold start is the CPB's power-on too, which counts resets from zero; the
+/* A cold start is the mtRAM's power-on too, which counts resets from zero; the
  * stop inside proc_boot then counts this one. */
 bool app_reset(bool cold)
 {
     if (cold && app_has_boot())
-        cpb_power_on();
+        mtram_power_on();
     return app_boot_again(cold ? PROC_REFILL : 0);
 }
 

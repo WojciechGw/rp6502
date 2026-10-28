@@ -6,7 +6,7 @@
  */
 
 #include "host/sokol/cli/cli.h"
-#include "core/wdc/cpb.h"
+#include "core/wdc/mtram.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,8 +75,8 @@ enum
     OPT_HELP = 256, OPT_SCREENSHOT, OPT_FRAMES, OPT_SCALE, OPT_FILTER, OPT_SCRIPT,
     OPT_INSTALL, OPT_SAVE_DIR, OPT_BGCOLOR, OPT_PHI2, OPT_CP, OPT_MEMSEED, OPT_MEMFILL,
     OPT_MUTE, OPT_DEBUG, OPT_DAP, OPT_CREDITS, OPT_VERSION, OPT_INI,
-    OPT_CRC, OPT_HEADLESS, OPT_STDIN, OPT_ASPECT, OPT_CPB, OPT_CPB_TEMP,
-    OPT_CPB_DELAY, OPT_DRIVE, OPT_NO_MIRROR,
+    OPT_CRC, OPT_HEADLESS, OPT_STDIN, OPT_ASPECT, OPT_MTRAM, OPT_MTRAM_TEMP,
+    OPT_MTRAM_DELAY, OPT_DRIVE, OPT_NO_MIRROR,
 };
 static const struct option longopts[] = {
     {"help",         no_argument,       NULL, OPT_HELP},
@@ -102,9 +102,9 @@ static const struct option longopts[] = {
     {"credits",      no_argument,       NULL, OPT_CREDITS},
     {"version",      no_argument,       NULL, OPT_VERSION},
     {"ini",          required_argument, NULL, OPT_INI},
-    {"cpb",          no_argument,       NULL, OPT_CPB},
-    {"cpb-temp",     required_argument, NULL, OPT_CPB_TEMP},
-    {"cpb-delay",    required_argument, NULL, OPT_CPB_DELAY},
+    {"mtram",        no_argument,       NULL, OPT_MTRAM},
+    {"mtram-temp",   required_argument, NULL, OPT_MTRAM_TEMP},
+    {"mtram-delay",  required_argument, NULL, OPT_MTRAM_DELAY},
     {"drive",        required_argument, NULL, OPT_DRIVE},
     {"no-mirror",    no_argument,       NULL, OPT_NO_MIRROR},
     {NULL, 0, NULL, 0},
@@ -161,13 +161,13 @@ void cli_usage(FILE *out, const char *argv0)
             "  --version                 print the version and exit\n"
             "  --ini <file>              config file for the debugger UI layout\n"
             "                            (ImGui format; e.g. the workspace .rp6502)\n"
-            "  --cpb                     a PICO-SRAM-BANKED module in the SRAM socket:\n"
+            "  --mtram                   an mtRAM module in the SRAM socket:\n"
             "                            512 KB in 2 KB banks, 16 task maps; RAM\n"
             "                            starts zeroed unless --memfill or --memseed\n"
             "                            is given\n"
-            "  --cpb-temp <C>            its core temperature at $FED6/$FED7\n"
+            "  --mtram-temp <C>          its core temperature at $FED6/$FED7\n"
             "                            (0-127.5, default 25)\n"
-            "  --cpb-delay <cycles>      PHI2 cycles before a write to $FEDE-$FEFF\n"
+            "  --mtram-delay <cycles>    PHI2 cycles before a write to $FEDE-$FEFF\n"
             "                            takes effect (0-1000000, default 0)\n"
             "  -- <args...>              pass the remaining words to the ROM as argv[1..]\n",
             argv0);
@@ -337,23 +337,23 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
             o->have_memfill = true;
             break;
         }
-        case OPT_CPB: o->cpb = true; break;
-        case OPT_CPB_TEMP:
+        case OPT_MTRAM: o->mtram = true; break;
+        case OPT_MTRAM_TEMP:
         {
             char *end;
-            o->cpb_temp = strtod(optarg, &end);
-            if (end == optarg || *end || !(o->cpb_temp >= 0 && o->cpb_temp <= 127.5))
-                return cli_bad("--cpb-temp", optarg), 2;
-            o->have_cpb_temp = true;
+            o->mtram_temp = strtod(optarg, &end);
+            if (end == optarg || *end || !(o->mtram_temp >= 0 && o->mtram_temp <= 127.5))
+                return cli_bad("--mtram-temp", optarg), 2;
+            o->have_mtram_temp = true;
             break;
         }
-        case OPT_CPB_DELAY:
+        case OPT_MTRAM_DELAY:
         {
             long long v;
-            if (!cli_number(optarg, &v) || v < 0 || v > CPB_DELAY_MAX)
-                return cli_bad("--cpb-delay", optarg), 2;
-            o->cpb_delay = (uint32_t)v;
-            o->have_cpb_delay = true;
+            if (!cli_number(optarg, &v) || v < 0 || v > MTRAM_DELAY_MAX)
+                return cli_bad("--mtram-delay", optarg), 2;
+            o->mtram_delay = (uint32_t)v;
+            o->have_mtram_delay = true;
             break;
         }
         case OPT_MUTE: o->mute = true; break;

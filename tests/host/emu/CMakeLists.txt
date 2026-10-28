@@ -8,7 +8,7 @@ rp6502_add_script_test(NAME poke COMMAND poke.txt ${GAMEPAD_ROM})
 
 rp6502_add_script_test(NAME state COMMAND state.txt ${GAMEPAD_ROM})
 
-rp6502_add_script_test(NAME cpb COMMAND cpb.txt --cpb --cpb-temp 45.5 ${CPB_ROM})
+rp6502_add_script_test(NAME mtram COMMAND mtram.txt --mtram --mtram-temp 45.5 ${MTRAM_ROM})
 
 set(DRIVE_DIR ${CMAKE_CURRENT_BINARY_DIR}/drive.msc0)
 file(REMOVE_RECURSE ${DRIVE_DIR})
@@ -88,10 +88,10 @@ foreach(_case
     "headless_with_crc;--headless;--crc"
     "aspect;--aspect;5:4"
     "aspect_empty;--aspect="
-    "cpb_temp_without_cpb;--cpb-temp;30"
-    "cpb_delay_without_cpb;--cpb-delay;10"
-    "cpb_temp_range;--cpb;--cpb-temp;200"
-    "cpb_delay_range;--cpb;--cpb-delay;2000000"
+    "mtram_temp_without_mtram;--mtram-temp;30"
+    "mtram_delay_without_mtram;--mtram-delay;10"
+    "mtram_temp_range;--mtram;--mtram-temp;200"
+    "mtram_delay_range;--mtram;--mtram-delay;2000000"
     "drive_without_folder;--drive;MSC0"
     "drive_bad_name;--drive;C=."
     "drive_missing_folder;--drive;MSC0=no-such-folder"
@@ -109,18 +109,18 @@ set_tests_properties(cli_crc PROPERTIES PASS_REGULAR_EXPRESSION
     "^[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]\n")
 rp6502_add_cli_test(phi2_zero --phi2 0 --crc --frames 1
     ${RP6502_TEST_CORPUS}/mode3_8bpp.rp6502)
-# The CPB probe ends its output with DONE. The host sees it unless
+# The mtRAM probe ends its output with DONE. The host sees it unless
 # --no-mirror keeps it on the machine's screen.
-rp6502_add_cli_test(mirror --cpb --frames 60
-    --screenshot ${CMAKE_CURRENT_BINARY_DIR}/mirror.png ${CPB_ROM})
+rp6502_add_cli_test(mirror --mtram --frames 60
+    --screenshot ${CMAKE_CURRENT_BINARY_DIR}/mirror.png ${MTRAM_ROM})
 set_tests_properties(cli_mirror PROPERTIES PASS_REGULAR_EXPRESSION "DONE")
-rp6502_add_cli_test(no_mirror --cpb --no-mirror --frames 60
-    --screenshot ${CMAKE_CURRENT_BINARY_DIR}/no_mirror.png ${CPB_ROM})
+rp6502_add_cli_test(no_mirror --mtram --no-mirror --frames 60
+    --screenshot ${CMAKE_CURRENT_BINARY_DIR}/no_mirror.png ${MTRAM_ROM})
 set_tests_properties(cli_no_mirror PROPERTIES FAIL_REGULAR_EXPRESSION "DONE")
 
-rp6502_add_cli_test(cpb --cpb --cpb-temp 45.5 --cpb-delay 100
+rp6502_add_cli_test(mtram --mtram --mtram-temp 45.5 --mtram-delay 100
     --crc --frames 10 ${RP6502_TEST_CORPUS}/mode3_8bpp.rp6502)
-set_tests_properties(cli_cpb PROPERTIES PASS_REGULAR_EXPRESSION
+set_tests_properties(cli_mtram PROPERTIES PASS_REGULAR_EXPRESSION
     "^[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]\n")
 
 # --aspect 16:9 makes the console 640x360, with 22 rows of 80 columns centered
@@ -147,7 +147,7 @@ endif()
 
 rp6502_add_test(sys LIBS emu_core)
 
-rp6502_add_test(cpb LIBS emu_core)
+rp6502_add_test(mtram LIBS emu_core)
 
 rp6502_add_test(vol LIBS emu_core)
 
