@@ -22,7 +22,8 @@ function(rp6502_osal_posix target)
         ${RP6502_OSAL_POSIX}/errmap.c
         ${RP6502_OSAL_POSIX}/fs.c
         ${RP6502_OSAL_POSIX}/fs_${P_TRANSPORT}.c
-        ${RP6502_OSAL_POSIX}/os.c)
+        ${RP6502_OSAL_POSIX}/os.c
+        ${RP6502_OSAL_POSIX}/../vol.c)
     if(NOT P_TRANSPORT STREQUAL "aio")
         return()
     endif()

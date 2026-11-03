@@ -22,7 +22,9 @@
 #include "host/host.h"
 #include "core/rom/rom.h"
 #include "osal/fs.h"
+#include "osal/vol.h"
 #include "core/wdc/sram.h"
+#include "core/wdc/mtram.h"
 #include "core/sys/xram.h"
 #include "core/wdc/phi2.h"
 #include "core/vga/vga_emu.h"
@@ -182,6 +184,20 @@ int main(int argc, char **argv)
         return 2;
     }
 
+    if ((o.have_mtram_temp || o.have_mtram_delay) && !o.mtram)
+    {
+        fprintf(stderr, "rp6502-emu: --mtram-temp and --mtram-delay need --mtram\n");
+        return 2;
+    }
+    /* Under --headless and --stdin the host's streams are the program's own,
+     * so there is no copy to leave out. */
+    if (o.no_mirror && o.console)
+    {
+        fprintf(stderr, "rp6502-emu: --no-mirror cannot be combined with "
+                        "--headless or --stdin\n");
+        return 2;
+    }
+
     /* The command-line settings are applied as config before sys_init.
      * Everything after sys_init needs the drivers and the resolved code page,
      * because converting argv is per code page. */
@@ -207,20 +223,48 @@ int main(int argc, char **argv)
      * the first frame. */
     if (o.fixed_aspect)
         vga_set_console_size(o.console_w, o.console_h);
-    /* Set before sys_init, which is where sram_init and xram_init fill. */
+    mtram_set_enabled(o.mtram);
+    if (o.have_mtram_temp)
+        mtram_set_temperature(o.mtram_temp);
+    mtram_set_delay(o.mtram_delay);
+    /* Set before sys_init, which is where sram_init and xram_init fill. The
+     * mtRAM module zeroes its whole backing store at power-on unless a fill is
+     * asked for; XRAM is the RIA's and keeps the default. */
     uint32_t memseed = o.have_memseed ? o.memseed : os_random();
-    sram_set_fill(!o.have_memfill, o.memfill, memseed);
+    if (o.mtram && !o.have_memfill && !o.have_memseed)
+        sram_set_fill(false, 0, memseed);
+    else
+        sram_set_fill(!o.have_memfill, o.memfill, memseed);
     xram_set_fill(!o.have_memfill, o.memfill, memseed);
     script_set_memory(o.have_memfill, o.memfill, memseed);
     sys_init();
 
-    streams_mirror_stderr();
+    if (!o.no_mirror)
+        streams_mirror_stderr();
 
     save_dir = o.save_dir ? save_dir_from(o.save_dir) : os_save_dir();
     if (o.save_dir && !save_dir)
     {
         fprintf(stderr, "rp6502-emu: cannot take the save folder '%s'\n", o.save_dir);
         return 1;
+    }
+
+    for (int i = 0; i < o.n_drives; i++)
+    {
+        const char *eq = strchr(o.drives[i], '=');
+        size_t nl = (size_t)(eq - o.drives[i]);
+        char name[VOL_NAME_MAX + 1] = "";
+        if (nl < sizeof name)
+            memcpy(name, o.drives[i], nl), name[nl] = 0;
+        char *root = fs_host_realpath(eq + 1);
+        const char *why = !root || !fs_host_is_dir(root) ? "no such folder"
+                                                          : vol_add(name, root);
+        free(root);
+        if (why)
+        {
+            fprintf(stderr, "rp6502-emu: --drive %s: %s\n", o.drives[i], why);
+            return 1;
+        }
     }
 
     /* Install ROMs before the boot load, or an exec, can resolve them. An
@@ -305,6 +349,12 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    /* The program starts on the first mapped drive, as one on the Pico starts
+     * on MSC0:. The ROM's path is absolute by now, so this cannot change which
+     * file boots. A DAP session, which has returned above, stays on the host's
+     * drive, because a launch request may name its program relatively. */
+    vol_set_current(vol_first());
+
     if (!rom)
     {
         /* With no ROM, --screenshot and --crc have no canvas to capture and
@@ -320,7 +370,8 @@ int main(int argc, char **argv)
         apply_options(&o);
         if (o.debug)
             dbg_set_active(true);
-        streams_mirror_stdout();
+        if (!o.no_mirror)
+            streams_mirror_stdout();
         return entry_run(g_fb, o.scale, o.have_scale, !o.debug);
     }
 
@@ -336,6 +387,8 @@ int main(int argc, char **argv)
     if (o.headless || o.script || o.screenshot || o.crc)
         fs_std_immediate(true);
     bool booted = proc_boot(rom, o.n_rom_args, o.rom_args, 0);
+    if (booted)
+        app_set_boot(rom, o.n_rom_args, o.rom_args);
     free(rom);
     if (!booted)
     {
@@ -369,7 +422,7 @@ int main(int argc, char **argv)
 
     /* The program's stdout on the host's too, except where host stdout is
      * already the emulator's own channel: a script's replies, a CRC. */
-    if (!o.script && !o.crc && !console_is_terminal)
+    if (!o.script && !o.crc && !console_is_terminal && !o.no_mirror)
         streams_mirror_stdout();
 
     sys_commit();

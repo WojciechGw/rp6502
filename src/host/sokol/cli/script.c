@@ -33,6 +33,7 @@
 #include "core/sys/xram.h"
 #include "core/vga/vga_emu.h"
 #include "core/aud/mix.h"
+#include "osal/dir.h"
 #include "osal/os.h"
 #include "chips/chips/w65c02.h"
 #include <ctype.h>
@@ -755,12 +756,12 @@ static uint8_t script_peek(script_space_t space, uint16_t addr)
         return REGS(addr);
     if (addr >= VIA_MMAP_LO)
         return via_reg_peek(addr);
-    return sram[addr];
+    return *sram_view(addr);
 }
 
 /* A plain poke sets what a read finds. bus: stores the way the 6502 does, so
- * a register does what a store to it does, and sram[] takes every byte the
- * way sram_tick does. */
+ * a register does what a store to it does, and RAM takes every byte through
+ * sram_tick, which an mtRAM's registers answer too. */
 static void script_poke(script_space_t space, uint16_t addr, uint8_t value)
 {
     if (space == SCRIPT_XRAM)
@@ -769,7 +770,7 @@ static void script_poke(script_space_t space, uint16_t addr, uint8_t value)
         ria_xram_write(addr, value);
     else if (space == SCRIPT_BUS)
     {
-        sram[addr] = value;
+        sram_tick(addr, false, &value);
         if (addr >= RIA_MMAP_LO)
             ria_reg_write(addr, value);
         else if (addr >= VIA_MMAP_LO)
@@ -780,7 +781,7 @@ static void script_poke(script_space_t space, uint16_t addr, uint8_t value)
     else if (addr >= VIA_MMAP_LO)
         via_reg_poke(addr, value);
     else
-        sram[addr] = value;
+        *sram_view(addr) = value;
 }
 
 static void script_put_le(uint32_t v, int bytes)
@@ -1718,7 +1719,14 @@ static bool script_command(const char *line)
             return script_error("load wants a quoted path");
         if (!script_end(p))
             return false;
-        oem_from_utf8(path, oem, sizeof oem);
+        /* A host file goes by its absolute name, which the drive the program
+         * is on cannot move; anything else, such as ":NAME", as written. */
+        char *abs = os_dir_from_host(path);
+        if (abs && strlen(abs) < sizeof oem)
+            strcpy(oem, abs);
+        else
+            oem_from_utf8(path, oem, sizeof oem);
+        free(abs);
         /* A running program would have its memory written out from under it,
          * so a load happens only between programs. */
         if (sys_active())

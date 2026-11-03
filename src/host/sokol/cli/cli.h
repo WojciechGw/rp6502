@@ -20,6 +20,8 @@ typedef struct
     bool help;
     const char *installs[16];
     int n_installs;
+    const char *drives[10]; /* NAME=FOLDER, VOL_MAX of them */
+    int n_drives;
     const char *save_dir;
     int bg_r, bg_g, bg_b;
     bool have_bg;
@@ -35,6 +37,7 @@ typedef struct
     bool crc;
     bool headless;
     bool console; /* --stdin */
+    bool no_mirror;
     bool unpaced; /* --phi2 0 */
     bool mute;
     bool debug;
@@ -46,6 +49,11 @@ typedef struct
     bool have_memseed;
     uint8_t memfill;
     bool have_memfill;
+    bool mtram;
+    double mtram_temp;
+    bool have_mtram_temp;
+    uint32_t mtram_delay;
+    bool have_mtram_delay;
     char **rom_args; /* the words after "--"; NULL when none was given */
     int n_rom_args;
 } cli_options;

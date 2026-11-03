@@ -1,0 +1,17 @@
+# Run with --drive MSC0=<folder holding hello.txt>. The program starts on
+# that drive, "/" is the drive's root, and ".." stops there.
+
+wait "start MSC0:/"
+wait "open 00"
+wait "chdrive 00"
+wait "cwd MSC0:/"
+wait "chdir 00"
+wait "cwd MSC0:/sub"
+wait "root 00"
+wait "up 00"
+wait "escape FF"
+wait "missing FF"
+wait "number 00"
+wait "unmapped FF"
+wait exit 60
+expect exit 0

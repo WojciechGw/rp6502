@@ -12,6 +12,7 @@
 #include "core/rom/rom.h"
 #include "core/ria/regs.h"
 #include "core/wdc/sram.h"
+#include "core/wdc/mtram.h"
 #include "core/sys/xram.h"
 #include "core/str/str.h"
 #include <errno.h>
@@ -32,6 +33,11 @@ static void rom_deposit(const rom_record_t *rec, const uint8_t *buf)
             xram[rec->addr - 0x10000 + i] = buf[i]; /* volatile, so not memcpy */
         return;
     }
+    /* On the module the RIA loads through the bus, where these bytes would act
+     * as control writes; here they are only stored. */
+    if (mtram_on && rec->addr <= MTRAM_REG_KNOCK && rec->addr + rec->len > MTRAM_REG_SWAPDONE)
+        com_printf("warning: ROM record $%04lX+%lu covers the mtRAM registers $FEDD-$FEFF\n",
+                   (unsigned long)rec->addr, (unsigned long)rec->len);
     for (uint32_t i = 0; i < rec->len; i++)
     {
         uint32_t a = rec->addr + i;

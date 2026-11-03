@@ -8,6 +8,24 @@ rp6502_add_script_test(NAME poke COMMAND poke.txt ${GAMEPAD_ROM})
 
 rp6502_add_script_test(NAME state COMMAND state.txt ${GAMEPAD_ROM})
 
+rp6502_add_script_test(NAME mtram COMMAND mtram.txt --mtram --mtram-temp 45.5 ${MTRAM_ROM})
+
+set(DRIVE_DIR ${CMAKE_CURRENT_BINARY_DIR}/drive.msc0)
+file(REMOVE_RECURSE ${DRIVE_DIR})
+file(WRITE ${DRIVE_DIR}/hello.txt "hello\n")
+rp6502_add_script_test(NAME msc_drive COMMAND msc_drive.txt
+    --drive MSC0=${DRIVE_DIR} ${MSC_DRIVE_ROM})
+
+# The ROM is named relatively, from its own folder, and still boots although
+# the program starts on the mapped drive.
+get_filename_component(_drive_rom_dir ${MSC_DRIVE_ROM} DIRECTORY)
+get_filename_component(_drive_rom_name ${MSC_DRIVE_ROM} NAME)
+add_test(NAME cli_drive_relative_rom COMMAND rp6502-emu
+    --drive MSC0=${DRIVE_DIR}
+    --script ${CMAKE_CURRENT_LIST_DIR}/msc_drive.txt ${_drive_rom_name})
+set_tests_properties(cli_drive_relative_rom PROPERTIES
+    WORKING_DIRECTORY ${_drive_rom_dir} LABELS "cli;host.emu")
+
 rp6502_add_script_test(NAME state_mode COMMAND state_mode.txt
     ${RP6502_TEST_CORPUS}/mode3_8bpp.rp6502)
 
@@ -69,7 +87,15 @@ foreach(_case
     "headless_with_script;--headless;--script;-"
     "headless_with_crc;--headless;--crc"
     "aspect;--aspect;5:4"
-    "aspect_empty;--aspect=")
+    "aspect_empty;--aspect="
+    "mtram_temp_without_mtram;--mtram-temp;30"
+    "mtram_delay_without_mtram;--mtram-delay;10"
+    "mtram_temp_range;--mtram;--mtram-temp;200"
+    "mtram_delay_range;--mtram;--mtram-delay;2000000"
+    "drive_without_folder;--drive;MSC0"
+    "drive_bad_name;--drive;C=."
+    "drive_missing_folder;--drive;MSC0=no-such-folder"
+    "no_mirror_with_headless;--no-mirror;--headless")
     list(POP_FRONT _case _name)
     rp6502_add_cli_test(${_name} ${_case} ${RP6502_TEST_CORPUS}/mode3_8bpp.rp6502)
     set_tests_properties(cli_${_name} PROPERTIES WILL_FAIL TRUE)
@@ -83,6 +109,19 @@ set_tests_properties(cli_crc PROPERTIES PASS_REGULAR_EXPRESSION
     "^[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]\n")
 rp6502_add_cli_test(phi2_zero --phi2 0 --crc --frames 1
     ${RP6502_TEST_CORPUS}/mode3_8bpp.rp6502)
+# The mtRAM probe ends its output with DONE. The host sees it unless
+# --no-mirror keeps it on the machine's screen.
+rp6502_add_cli_test(mirror --mtram --frames 60
+    --screenshot ${CMAKE_CURRENT_BINARY_DIR}/mirror.png ${MTRAM_ROM})
+set_tests_properties(cli_mirror PROPERTIES PASS_REGULAR_EXPRESSION "DONE")
+rp6502_add_cli_test(no_mirror --mtram --no-mirror --frames 60
+    --screenshot ${CMAKE_CURRENT_BINARY_DIR}/no_mirror.png ${MTRAM_ROM})
+set_tests_properties(cli_no_mirror PROPERTIES FAIL_REGULAR_EXPRESSION "DONE")
+
+rp6502_add_cli_test(mtram --mtram --mtram-temp 45.5 --mtram-delay 100
+    --crc --frames 10 ${RP6502_TEST_CORPUS}/mode3_8bpp.rp6502)
+set_tests_properties(cli_mtram PROPERTIES PASS_REGULAR_EXPRESSION
+    "^[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]\n")
 
 # --aspect 16:9 makes the console 640x360, with 22 rows of 80 columns centered
 # at lines 4 to 356. mode0_return ends on the console with its text there and
@@ -107,6 +146,10 @@ if(WIN32)
 endif()
 
 rp6502_add_test(sys LIBS emu_core)
+
+rp6502_add_test(mtram LIBS emu_core)
+
+rp6502_add_test(vol LIBS emu_core)
 
 rp6502_add_test(sst LIBS emu_core ROM ${ADVENTURE_ROM})
 

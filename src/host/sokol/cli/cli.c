@@ -6,6 +6,7 @@
  */
 
 #include "host/sokol/cli/cli.h"
+#include "core/wdc/mtram.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -74,7 +75,8 @@ enum
     OPT_HELP = 256, OPT_SCREENSHOT, OPT_FRAMES, OPT_SCALE, OPT_FILTER, OPT_SCRIPT,
     OPT_INSTALL, OPT_SAVE_DIR, OPT_BGCOLOR, OPT_PHI2, OPT_CP, OPT_MEMSEED, OPT_MEMFILL,
     OPT_MUTE, OPT_DEBUG, OPT_DAP, OPT_CREDITS, OPT_VERSION, OPT_INI,
-    OPT_CRC, OPT_HEADLESS, OPT_STDIN, OPT_ASPECT,
+    OPT_CRC, OPT_HEADLESS, OPT_STDIN, OPT_ASPECT, OPT_MTRAM, OPT_MTRAM_TEMP,
+    OPT_MTRAM_DELAY, OPT_DRIVE, OPT_NO_MIRROR,
 };
 static const struct option longopts[] = {
     {"help",         no_argument,       NULL, OPT_HELP},
@@ -100,6 +102,11 @@ static const struct option longopts[] = {
     {"credits",      no_argument,       NULL, OPT_CREDITS},
     {"version",      no_argument,       NULL, OPT_VERSION},
     {"ini",          required_argument, NULL, OPT_INI},
+    {"mtram",        no_argument,       NULL, OPT_MTRAM},
+    {"mtram-temp",   required_argument, NULL, OPT_MTRAM_TEMP},
+    {"mtram-delay",  required_argument, NULL, OPT_MTRAM_DELAY},
+    {"drive",        required_argument, NULL, OPT_DRIVE},
+    {"no-mirror",    no_argument,       NULL, OPT_NO_MIRROR},
     {NULL, 0, NULL, 0},
 };
 
@@ -123,12 +130,18 @@ void cli_usage(FILE *out, const char *argv0)
             "  --stdin                   host stdin is the machine's console, and a terminal\n"
             "                            there is the console: keys raw, screen drawn on it,\n"
             "                            Ctrl-\\ the way out. Implied by --headless\n"
+            "  --no-mirror               the program's stdout and stderr stay on the\n"
+            "                            machine's screen, not copied to the host's\n"
             "  --install <file>          install a file on the null drive, reached as\n"
             "                            :basename, which a program runs or reads;\n"
             "                            repeatable, and the first one boots when no\n"
             "                            ROM is named\n"
             "  --save-dir <folder>       the folder behind SAVE:, made by the first save\n"
             "                            (default: this OS's folder for saved data)\n"
+            "  --drive NAME=<folder>     a host folder as the drive NAME:, such as\n"
+            "                            MSC0=usb for MSC0:; NAME is 2-8 letters and\n"
+            "                            digits; repeatable, up to ten drives; the\n"
+            "                            program starts on the first\n"
             "  --bgcolor RRGGBB          letterbox/pillarbox fill color, # optional\n"
             "                            (default 000000)\n"
             "  --phi2 <khz>              6502 clock in kHz (100-8000, default 8000);\n"
@@ -148,6 +161,14 @@ void cli_usage(FILE *out, const char *argv0)
             "  --version                 print the version and exit\n"
             "  --ini <file>              config file for the debugger UI layout\n"
             "                            (ImGui format; e.g. the workspace .rp6502)\n"
+            "  --mtram                   an mtRAM module in the SRAM socket:\n"
+            "                            512 KB in 2 KB banks, 16 task maps; RAM\n"
+            "                            starts zeroed unless --memfill or --memseed\n"
+            "                            is given\n"
+            "  --mtram-temp <C>          its core temperature at $FED6/$FED7\n"
+            "                            (0-127.5, default 25)\n"
+            "  --mtram-delay <cycles>    PHI2 cycles before a write to $FEDE-$FEFF\n"
+            "                            takes effect (0-1000000, default 0)\n"
             "  -- <args...>              pass the remaining words to the ROM as argv[1..]\n",
             argv0);
 }
@@ -194,6 +215,7 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
         case OPT_CRC: o->crc = true; break;
         case OPT_HEADLESS: o->headless = true; break;
         case OPT_STDIN: o->console = true; break;
+        case OPT_NO_MIRROR: o->no_mirror = true; break;
         case OPT_FRAMES:
         {
             long long v;
@@ -258,6 +280,19 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
             break;
         }
         case OPT_SAVE_DIR: o->save_dir = optarg; break;
+        case OPT_DRIVE:
+        {
+            int max = (int)(sizeof(o->drives) / sizeof(o->drives[0]));
+            if (!strchr(optarg, '='))
+                return cli_bad("--drive", optarg), 2;
+            if (o->n_drives == max)
+            {
+                fprintf(stderr, "rp6502-emu: too many --drive (max %d)\n", max);
+                return 2;
+            }
+            o->drives[o->n_drives++] = optarg;
+            break;
+        }
         case OPT_BGCOLOR:
             if (!parse_hex_color(optarg, &o->bg_r, &o->bg_g, &o->bg_b))
             {
@@ -300,6 +335,25 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
                 return cli_bad("--memfill", optarg), 2;
             o->memfill = (uint8_t)v;
             o->have_memfill = true;
+            break;
+        }
+        case OPT_MTRAM: o->mtram = true; break;
+        case OPT_MTRAM_TEMP:
+        {
+            char *end;
+            o->mtram_temp = strtod(optarg, &end);
+            if (end == optarg || *end || !(o->mtram_temp >= 0 && o->mtram_temp <= 127.5))
+                return cli_bad("--mtram-temp", optarg), 2;
+            o->have_mtram_temp = true;
+            break;
+        }
+        case OPT_MTRAM_DELAY:
+        {
+            long long v;
+            if (!cli_number(optarg, &v) || v < 0 || v > MTRAM_DELAY_MAX)
+                return cli_bad("--mtram-delay", optarg), 2;
+            o->mtram_delay = (uint32_t)v;
+            o->have_mtram_delay = true;
             break;
         }
         case OPT_MUTE: o->mute = true; break;

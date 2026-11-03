@@ -55,6 +55,19 @@ char *app_rom_path(const char *host);
  * monitor. */
 bool app_boot_rom(const char *path);
 
+/* The program the host booted last, from the command line or a drop, with its
+ * arguments in the code page. The resets and the break below start it again. */
+void app_set_boot(const char *rom, int argc, char *const *args);
+bool app_has_boot(void);
+
+/* The debugger's machine controls, false when nothing was started, as while a
+ * DAP client controls the machine. A warm reset asserts RESB and boots the
+ * host's program again over RAM as it is; a cold one refills RAM and XRAM first,
+ * as a power cycle would. A break stops the program and goes back to its
+ * launcher, or without one boots the host's program again. */
+bool app_reset(bool cold);
+bool app_break(void);
+
 uint64_t app_machine_ns(void);
 
 /* sokol's logger, for every .logger.func. Its lines are the sokol log category,
