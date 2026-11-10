@@ -8,8 +8,10 @@
  * The debug window of the mtRAM module in the SRAM socket:
  * the bus as the module sees it after the last cycle, its control state, the
  * live map, the sixteen task maps, and the 256 blocks with a read-only view of
- * one of them. BA11 to BA18 are not module pins; they are the block the live
- * map turns the address into, which is where the access lands.
+ * one of them. BA11 to BA18, DRV and WIN are not module pins: BA11-BA18 are
+ * the block the live map turns the address into, which is where the access
+ * lands, DRV is the module driving the data bus, and WIN an access to its
+ * register window.
  *
  * Like ui_ria.h, this header carries its implementation under CHIPS_UI_IMPL,
  * and the unit that defines that must have included ImGui already.
@@ -73,8 +75,9 @@ extern "C"
 
 #define UI_MTRAM_PIN_RWB (1ULL << 24)
 #define UI_MTRAM_PIN_PHI2 (1ULL << 25)
-#define UI_MTRAM_PIN_CE2 (1ULL << 26)
+#define UI_MTRAM_PIN_DRV (1ULL << 26)
 #define UI_MTRAM_PIN_BA11 (1ULL << 27)
+#define UI_MTRAM_PIN_WIN (1ULL << 35)
 
 static const ui_chip_pin_t _ui_mtram_pins[] = {
     {"D0", 0, 1ULL << 16}, {"D1", 1, 1ULL << 17},
@@ -82,7 +85,7 @@ static const ui_chip_pin_t _ui_mtram_pins[] = {
     {"D4", 4, 1ULL << 20}, {"D5", 5, 1ULL << 21},
     {"D6", 6, 1ULL << 22}, {"D7", 7, 1ULL << 23},
     {"RWB", 9, UI_MTRAM_PIN_RWB}, {"PHI2", 10, UI_MTRAM_PIN_PHI2},
-    {"CE2", 11, UI_MTRAM_PIN_CE2},
+    {"DRV", 11, UI_MTRAM_PIN_DRV}, {"WIN", 12, UI_MTRAM_PIN_WIN},
     {"BA11", 13, UI_MTRAM_PIN_BA11 << 0}, {"BA12", 14, UI_MTRAM_PIN_BA11 << 1},
     {"BA13", 15, UI_MTRAM_PIN_BA11 << 2}, {"BA14", 16, UI_MTRAM_PIN_BA11 << 3},
     {"BA15", 17, UI_MTRAM_PIN_BA11 << 4}, {"BA16", 18, UI_MTRAM_PIN_BA11 << 5},
@@ -185,7 +188,8 @@ static void _ui_mtram_status(const mtram_dbg_t *st, uint64_t cpu_pins)
     uint32_t phys = ((uint32_t)block << MTRAM_BLOCK_SHIFT) | (addr & (MTRAM_BLOCK_SIZE - 1));
     ImGui::Text("Bus:          %s $%04X -> block %u, $%05X", (cpu_pins & W65C02_RW) ? "R" : "W",
                 (unsigned)addr, (unsigned)block, (unsigned)phys);
-    ImGui::TextDisabled("CE2 is IORQB: NAND(A8..A15), low for $FF00-$FFFF");
+    ImGui::TextDisabled("DRV: mtRAM drives D0-D7, a read of $0000-$FF7F");
+    ImGui::TextDisabled("WIN: an access to the register window $FF00-$FF7F");
 }
 
 static void _ui_mtram_blocks(ui_mtram_t *win, const mtram_dbg_t *st)
@@ -308,8 +312,12 @@ void ui_mtram_draw(ui_mtram_t *win)
             p |= UI_MTRAM_PIN_RWB;
         if (sys_running())
             p |= UI_MTRAM_PIN_PHI2;
-        if (addr < 0xFF00)
-            p |= UI_MTRAM_PIN_CE2;
+        /* Where CE2 selects it, and in its window, where CE2 is low and the
+         * firmware picks the address out by A7. */
+        if ((cpu_pins & W65C02_RW) && addr <= MTRAM_REG_WINDOW_LAST)
+            p |= UI_MTRAM_PIN_DRV;
+        if (addr >= MTRAM_REG_WINDOW_BASE && addr <= MTRAM_REG_WINDOW_LAST)
+            p |= UI_MTRAM_PIN_WIN;
         p |= (uint64_t)st.active_map[addr >> MTRAM_BLOCK_SHIFT] * UI_MTRAM_PIN_BA11;
 
         ImGui::BeginChild("##mtram_pins", ImVec2(176, 0), ImGuiChildFlags_Borders);
