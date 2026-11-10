@@ -24,7 +24,6 @@ static uint8_t *mtram_slot[MTRAM_SLOTS];
 static uint8_t mtram_active_map[MTRAM_SLOTS];
 static uint8_t mtram_task_map[MTRAM_TASKS][MTRAM_SLOTS];
 static bool mtram_gate;
-static bool mtram_status_hidden;
 static uint8_t mtram_active_task;
 static uint8_t mtram_edit_task;
 static uint8_t mtram_knock_pos;
@@ -44,7 +43,7 @@ static mtram_event_t mtram_queue[MTRAM_QUEUE_LEN];
 static uint8_t mtram_queue_head;
 static uint16_t mtram_queue_count;
 
-static uint8_t mtram_temp = 50;
+static int16_t mtram_temp = 2500;
 static uint32_t mtram_delay;
 
 static const uint8_t mtram_knock_prefix[8] = {'#', '!', 'R', 'P', '6', '5', '0', '2'};
@@ -54,16 +53,18 @@ void mtram_set_enabled(bool on)
     mtram_on = on;
 }
 
-/* The module's encoding: degrees x 2, rounded, saturating at both ends. */
+/* The module's encoding: hundredths of a degree, rounded, saturating at both
+ * ends of int16. */
 void mtram_set_temperature(double celsius)
 {
-    double half_steps = celsius * 2.0 + 0.5;
-    if (half_steps < 0.0)
-        mtram_temp = 0;
-    else if (half_steps > 255.0)
-        mtram_temp = 255;
+    double v = celsius * 100.0;
+    v += v < 0.0 ? -0.5 : 0.5;
+    if (v < -32768.0)
+        mtram_temp = INT16_MIN;
+    else if (v > 32767.0)
+        mtram_temp = INT16_MAX;
     else
-        mtram_temp = (uint8_t)half_steps;
+        mtram_temp = (int16_t)v;
 }
 
 void mtram_set_delay(uint32_t cycles)
@@ -94,21 +95,27 @@ static void mtram_reset_all_maps(void)
     }
 }
 
-static void mtram_publish_temperature(void)
+static void mtram_store16(uint16_t reg, int16_t v)
 {
-    sram[MTRAM_REG_TEMP_MIN] = mtram_temp;
-    sram[MTRAM_REG_TEMP_MAX] = mtram_temp;
+    sram[reg] = (uint8_t)v;
+    sram[reg + 1] = (uint8_t)((uint16_t)v >> 8);
 }
 
-/* The first '+', 'T' or 'C' since the last reset. Until then $FED5-$FED7 are
- * the program's RAM, so a loader's verify finds what its write left there. */
-static void mtram_status_show(void)
+static void mtram_signature_write(void)
 {
-    if (!mtram_status_hidden)
-        return;
-    mtram_status_hidden = false;
-    sram[MTRAM_REG_RESETS] = mtram_resets;
-    mtram_publish_temperature();
+    sram[MTRAM_REG_SIGNATURE] = 'm';
+    sram[MTRAM_REG_SIGNATURE + 1] = 't';
+    sram[MTRAM_REG_SIGNATURE + 2] = 'R';
+}
+
+/* A temperature that never changes is its own range, so 'C' has nothing to
+ * clear. The module writes the signature with every measurement. */
+static void mtram_publish_temperature(void)
+{
+    mtram_store16(MTRAM_REG_TEMP_CURR, mtram_temp);
+    mtram_store16(MTRAM_REG_TEMP_MIN, mtram_temp);
+    mtram_store16(MTRAM_REG_TEMP_MAX, mtram_temp);
+    mtram_signature_write();
 }
 
 static void mtram_knock_feed(uint8_t data)
@@ -126,7 +133,6 @@ static void mtram_knock_feed(uint8_t data)
     {
     case '+':
         mtram_gate = true;
-        mtram_status_show();
         break;
     case '-':
         mtram_reset_all_maps();
@@ -134,14 +140,24 @@ static void mtram_knock_feed(uint8_t data)
         break;
     case 'T':
     case 'C':
-        mtram_status_show();
         mtram_publish_temperature();
         break;
     }
 }
 
+static bool mtram_is_control(uint16_t addr)
+{
+    return (addr >= MTRAM_REG_BANK_BASE && addr <= MTRAM_REG_EDIT) ||
+           (addr >= MTRAM_REG_SIGNATURE && addr <= MTRAM_REG_WINDOW_LAST);
+}
+
 static void mtram_control(uint16_t addr, uint8_t data)
 {
+    if (addr >= MTRAM_REG_SIGNATURE)
+    {
+        mtram_signature_write();
+        return;
+    }
     if (addr == MTRAM_REG_KNOCK)
     {
         mtram_knock_feed(data);
@@ -217,10 +233,11 @@ void mtram_init_memory(bool random, uint8_t value, uint32_t seed)
     mtram_queue_count = 0;
     mtram_reset_all_maps();
     mtram_gate = false;
-    mtram_status_hidden = true;
     mtram_active_task = 0;
     mtram_edit_task = 0;
     mtram_knock_pos = 0;
+    sram[MTRAM_REG_RESETS] = mtram_resets;
+    mtram_publish_temperature();
     mtram_temp_cycle = mtram_cycle;
 }
 
@@ -233,10 +250,10 @@ void mtram_tick(uint16_t addr, bool read, uint8_t *data)
     if (!read)
     {
         *p = *data;
-        if (addr >= MTRAM_REG_EDIT && addr <= MTRAM_REG_KNOCK)
+        if (mtram_is_control(addr))
             mtram_post(addr, *data);
     }
-    else if (addr <= SRAM_MMAP_HI)
+    else if (addr <= MTRAM_REG_WINDOW_LAST)
         *data = *p;
     while (mtram_queue_count &&
            (int32_t)(mtram_cycle - mtram_queue[mtram_queue_head].due) >= 0)
@@ -249,8 +266,8 @@ uint8_t *mtram_view(uint16_t addr)
 }
 
 /* RESB is asserted again on every stop, so only the falling edge counts, as
- * the module's debounced tap does. Memory survives and no byte is written;
- * only the maps reset and the status bytes hide. The maps reset with the
+ * the module's debounced tap does. Memory survives; the maps reset, and the
+ * count and the signature are written in the window. The maps reset with the
  * module off too, so a savestate always carries valid ones. */
 void mtram_resb(bool low)
 {
@@ -261,12 +278,13 @@ void mtram_resb(bool low)
     mtram_queue_drain();
     mtram_reset_all_maps();
     mtram_gate = false;
-    mtram_status_hidden = true;
     mtram_active_task = 0;
     mtram_edit_task = 0;
     mtram_knock_pos = 0;
-    if (mtram_on)
-        ++mtram_resets;
+    if (!mtram_on)
+        return;
+    sram[MTRAM_REG_RESETS] = ++mtram_resets;
+    mtram_signature_write();
 }
 
 void mtram_power_on(void)
@@ -284,15 +302,13 @@ void mtram_task(void)
     if (mtram_cycle - mtram_temp_cycle >= (uint32_t)phi2_get_khz_run() * 1000u)
     {
         mtram_temp_cycle = mtram_cycle;
-        if (!mtram_status_hidden)
-            mtram_publish_temperature();
+        mtram_publish_temperature();
     }
 }
 
 void mtram_dbg_get(mtram_dbg_t *out)
 {
     out->gate = mtram_gate;
-    out->status_hidden = mtram_status_hidden;
     out->active_task = mtram_active_task;
     out->edit_task = mtram_edit_task;
     out->knock_pos = mtram_knock_pos;
@@ -316,7 +332,6 @@ void mtram_sst_save(sst_cursor_t *c, unsigned flags)
     sst_put(c, mtram_active_map, sizeof mtram_active_map);
     sst_put(c, mtram_task_map, sizeof mtram_task_map);
     sst_put_bool(c, mtram_gate);
-    sst_put_bool(c, mtram_status_hidden);
     sst_put_u8(c, mtram_active_task);
     sst_put_u8(c, mtram_edit_task);
     sst_put_u8(c, mtram_knock_pos);
@@ -354,7 +369,6 @@ bool mtram_sst_load(sst_cursor_t *c, unsigned flags)
     sst_get(c, active_map, sizeof active_map);
     sst_get(c, task_map, sizeof task_map);
     bool gate = sst_get_bool(c);
-    bool status_hidden = sst_get_bool(c);
     uint8_t active_task = sst_get_u8(c);
     uint8_t edit_task = sst_get_u8(c);
     uint8_t knock_pos = sst_get_u8(c);
@@ -379,15 +393,13 @@ bool mtram_sst_load(sst_cursor_t *c, unsigned flags)
             return false;
     for (unsigned i = 0; i < queue_count; i++)
     {
-        uint16_t addr = queue[(uint8_t)(queue_head + i)].addr;
-        if (addr < MTRAM_REG_EDIT || addr > MTRAM_REG_KNOCK)
+        if (!mtram_is_control(queue[(uint8_t)(queue_head + i)].addr))
             return false;
     }
     for (uint8_t s = 0; s < MTRAM_SLOTS; s++)
         mtram_map_slot(s, active_map[s]);
     memcpy(mtram_task_map, task_map, sizeof mtram_task_map);
     mtram_gate = gate;
-    mtram_status_hidden = status_hidden;
     mtram_active_task = active_task;
     mtram_edit_task = edit_task;
     mtram_knock_pos = knock_pos;

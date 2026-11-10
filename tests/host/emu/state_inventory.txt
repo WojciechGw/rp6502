@@ -294,7 +294,6 @@ core/wdc/mtram.c mtram_queue_head: the MTRM chunk
 core/wdc/mtram.c mtram_resb_low: the MTRM chunk
 core/wdc/mtram.c mtram_resets: the MTRM chunk
 core/wdc/mtram.c mtram_slot: derived: the MTRM chunk's load rebuilds it from the active map
-core/wdc/mtram.c mtram_status_hidden: the MTRM chunk
 core/wdc/mtram.c mtram_task_map: the MTRM chunk
 core/wdc/mtram.c mtram_temp: not carried: a session's mtRAM setting
 core/wdc/mtram.c mtram_temp_cycle: the MTRM chunk

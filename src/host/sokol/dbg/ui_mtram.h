@@ -171,9 +171,14 @@ static void _ui_mtram_status(const mtram_dbg_t *st, uint64_t cpu_pins)
     ImGui::Text("Edit task:    %u", (unsigned)st->edit_task);
     ImGui::Text("Knock:        %.*s (%u/8)", (int)st->knock_pos, "#!RP6502",
                 (unsigned)st->knock_pos);
-    ImGui::Text("Status:       %s ($FED5-$FED7)", st->status_hidden ? "hidden" : "published");
-    ImGui::Text("Resets:       %u ($FED5)", (unsigned)st->resets);
-    ImGui::Text("Temperature:  %.1f C ($FED6/7 = $%02X)", st->temp / 2.0, (unsigned)st->temp);
+    ImGui::Text("Resets:       %u ($FF23)", (unsigned)st->resets);
+    ImGui::Text("Temperature:  %.2f C ($FF24/26/28 = $%04X)", st->temp / 100.0,
+                (unsigned)(uint16_t)st->temp);
+    const uint8_t *sig = mtram_dbg_block(MTRAM_PINNED_SLOT) +
+                         (MTRAM_REG_SIGNATURE & (MTRAM_BLOCK_SIZE - 1));
+    bool sig_ok = sig[0] == 'm' && sig[1] == 't' && sig[2] == 'R';
+    ImGui::Text("Signature:    %s ($FF7D = $%02X $%02X $%02X)", sig_ok ? "mtR" : "overwritten",
+                (unsigned)sig[0], (unsigned)sig[1], (unsigned)sig[2]);
     ImGui::Text("Delay:        %u cycles, %u queued", (unsigned)st->delay, (unsigned)st->queued);
     uint16_t addr = (uint16_t)(cpu_pins & 0xFFFF);
     uint8_t block = st->active_map[addr >> MTRAM_BLOCK_SHIFT];

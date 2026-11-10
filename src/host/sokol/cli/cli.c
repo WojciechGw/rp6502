@@ -165,10 +165,10 @@ void cli_usage(FILE *out, const char *argv0)
             "                            512 KB in 2 KB banks, 16 task maps; RAM\n"
             "                            starts zeroed unless --memfill or --memseed\n"
             "                            is given\n"
-            "  --mtram-temp <C>          its core temperature at $FED6/$FED7\n"
-            "                            (0-127.5, default 25)\n"
-            "  --mtram-delay <cycles>    PHI2 cycles before a write to $FEDE-$FEFF\n"
-            "                            takes effect (0-1000000, default 0)\n"
+            "  --mtram-temp <C>          its core temperature at $FF24-$FF29\n"
+            "                            (-40 to 125, default 25)\n"
+            "  --mtram-delay <cycles>    PHI2 cycles before a write to its registers\n"
+            "                            $FF00-$FF21 takes effect (0-1000000, default 0)\n"
             "  -- <args...>              pass the remaining words to the ROM as argv[1..]\n",
             argv0);
 }
@@ -342,7 +342,7 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
         {
             char *end;
             o->mtram_temp = strtod(optarg, &end);
-            if (end == optarg || *end || !(o->mtram_temp >= 0 && o->mtram_temp <= 127.5))
+            if (end == optarg || *end || !(o->mtram_temp >= MTRAM_TEMP_MIN_C && o->mtram_temp <= MTRAM_TEMP_MAX_C))
                 return cli_bad("--mtram-temp", optarg), 2;
             o->have_mtram_temp = true;
             break;

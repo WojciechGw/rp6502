@@ -58,6 +58,17 @@ static void map(uint8_t slot, uint8_t block)
     wr((uint16_t)(MTRAM_REG_BANK_BASE + slot), block);
 }
 
+static int16_t reg16(uint16_t reg)
+{
+    return (int16_t)(sram[reg] | (sram[reg + 1] << 8));
+}
+
+static bool signed_off(void)
+{
+    return rd(MTRAM_REG_SIGNATURE) == 'm' && rd(MTRAM_REG_SIGNATURE + 1) == 't' &&
+           rd(MTRAM_REG_SIGNATURE + 2) == 'R';
+}
+
 static mtram_dbg_t state(void)
 {
     mtram_dbg_t st;
@@ -204,53 +215,64 @@ UTEST(mtram, resb_resets_on_its_falling_edge_only)
     mtram_resb(false);
 }
 
-/* The module firmware's test_status_hidden(): a program that never knocks
- * keeps $FED5 across the loader's resets. */
-UTEST(mtram, the_status_bytes_wait_for_a_knock)
+/* The window has no program's RAM to hide from, so the count is written at
+ * every reset and the temperature from the start, with no knock. */
+UTEST(mtram, the_status_is_always_published)
 {
     fresh(0);
     mtram_power_on();
-    ASSERT_TRUE(state().status_hidden);
+    memset(&sram[MTRAM_REG_WINDOW_BASE], 0, 0x80);
+    mtram_init_memory(false, 0, 0);
+    ASSERT_EQ(rd(MTRAM_REG_RESETS), 0);
+    ASSERT_EQ(reg16(MTRAM_REG_TEMP_CURR), 2500);
+    ASSERT_TRUE(signed_off());
     for (int i = 0; i < 10; i++)
     {
         mtram_resb(true);
         mtram_resb(false);
     }
-    ASSERT_EQ(sram[MTRAM_REG_RESETS], 0);
-    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 0);
+    ASSERT_EQ(rd(MTRAM_REG_RESETS), 10);
     wr(MTRAM_REG_RESETS, 0xC3);
-    for (int i = 0; i < 100; i++)
-    {
-        mtram_resb(true);
-        mtram_resb(false);
-    }
-    ASSERT_EQ(state().resets, 110);
-    ASSERT_EQ(sram[MTRAM_REG_RESETS], 0xC3);
-
-    knock('B');
-    ASSERT_TRUE(state().status_hidden);
-    ASSERT_EQ(sram[MTRAM_REG_RESETS], 0xC3);
-
-    knock('+');
-    ASSERT_FALSE(state().status_hidden);
-    ASSERT_EQ(sram[MTRAM_REG_RESETS], 110);
-    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 50);
-    ASSERT_EQ(sram[MTRAM_REG_TEMP_MAX], 50);
-
-    wr(MTRAM_REG_RESETS, 0x11);
-    knock('+');
-    ASSERT_EQ(sram[MTRAM_REG_RESETS], 0x11);
-    knock('-');
-    ASSERT_FALSE(state().status_hidden);
-
+    ASSERT_EQ(rd(MTRAM_REG_RESETS), 0xC3);
     mtram_resb(true);
-    ASSERT_TRUE(state().status_hidden);
-    ASSERT_EQ(sram[MTRAM_REG_RESETS], 0x11);
     mtram_resb(false);
+    ASSERT_EQ(rd(MTRAM_REG_RESETS), 11);
+}
 
-    knock('T');
-    ASSERT_FALSE(state().status_hidden);
-    ASSERT_EQ(sram[MTRAM_REG_RESETS], 111);
+UTEST(mtram, the_window_answers_reads)
+{
+    fresh(0);
+    ASSERT_EQ(rd(MTRAM_REG_SIGNATURE), 'm');
+    ASSERT_EQ(rd(MTRAM_REG_WINDOW_LAST), 'R');
+    wr(0xFF40, 0x5A);
+    ASSERT_EQ(rd(0xFF40), 0x5A);
+    ASSERT_EQ(rd(0xFF80), 0xA5);
+    mtram_set_enabled(false);
+    ASSERT_EQ(rd(MTRAM_REG_SIGNATURE), 0xA5);
+}
+
+UTEST(mtram, the_old_registers_are_plain_ram)
+{
+    fresh(0);
+    for (const char *p = "#!RP6502+"; *p; p++)
+        wr(0xFEFF, (uint8_t)*p);
+    wr(0xFEF0, 100);
+    ASSERT_FALSE(state().gate);
+    ASSERT_EQ(rd(0xFEF0), 100);
+    ASSERT_EQ(state().active_map[16], 16);
+}
+
+UTEST(mtram, the_signature_comes_back_after_a_write)
+{
+    fresh(0);
+    wr(MTRAM_REG_SIGNATURE + 1, 0x00);
+    ASSERT_TRUE(signed_off());
+
+    fresh(4);
+    wr(MTRAM_REG_SIGNATURE, 0x00);
+    ASSERT_EQ(rd(MTRAM_REG_SIGNATURE), 0x00);
+    idle(4);
+    ASSERT_TRUE(signed_off());
 }
 
 UTEST(mtram, no_delay_takes_effect_on_the_next_cycle)
@@ -334,31 +356,33 @@ UTEST(mtram, the_temperature_is_published_and_restored)
     mtram_set_temperature(45.5);
     memset(sram, 0, sizeof sram);
     mtram_init_memory(false, 0, 0);
-    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 0);
-    ASSERT_EQ(sram[MTRAM_REG_TEMP_MAX], 0);
-    knock('T');
-    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 0x5B);
-    ASSERT_EQ(sram[MTRAM_REG_TEMP_MAX], 0x5B);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_CURR], 0xC6);
+    ASSERT_EQ(sram[MTRAM_REG_TEMP_CURR + 1], 0x11);
+    ASSERT_EQ(reg16(MTRAM_REG_TEMP_MIN), 4550);
+    ASSERT_EQ(reg16(MTRAM_REG_TEMP_MAX), 4550);
     wr(MTRAM_REG_TEMP_MIN, 0);
     wr(MTRAM_REG_TEMP_MAX, 0);
     knock('T');
-    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 0x5B);
-    wr(MTRAM_REG_TEMP_MAX, 0);
+    ASSERT_EQ(reg16(MTRAM_REG_TEMP_MIN), 4550);
+    ASSERT_EQ(reg16(MTRAM_REG_TEMP_MAX), 4550);
+    wr(MTRAM_REG_TEMP_CURR, 0);
     knock('C');
-    ASSERT_EQ(sram[MTRAM_REG_TEMP_MAX], 0x5B);
+    ASSERT_EQ(reg16(MTRAM_REG_TEMP_CURR), 4550);
 }
 
-UTEST(mtram, the_temperature_saturates)
+UTEST(mtram, the_temperature_is_signed_hundredths)
 {
     mtram_set_enabled(true);
-    mtram_set_temperature(200.0);
+    mtram_set_temperature(-12.34);
     mtram_init_memory(false, 0, 0);
-    knock('T');
-    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 0xFF);
-    mtram_set_temperature(-3.0);
+    ASSERT_EQ(reg16(MTRAM_REG_TEMP_CURR), -1234);
+    mtram_set_temperature(23.47);
     mtram_init_memory(false, 0, 0);
-    knock('T');
-    ASSERT_EQ(sram[MTRAM_REG_TEMP_MIN], 0x00);
+    ASSERT_EQ(reg16(MTRAM_REG_TEMP_CURR), 2347);
+    mtram_set_temperature(400.0);
+    mtram_init_memory(false, 0, 0);
+    ASSERT_EQ(reg16(MTRAM_REG_TEMP_CURR), INT16_MAX);
+    mtram_set_temperature(25.0);
 }
 
 UTEST(mtram, a_savestate_carries_the_maps)
@@ -379,11 +403,11 @@ UTEST(mtram, a_savestate_carries_the_maps)
     ASSERT_EQ(rd(SLOT16), 0x00);
     mtram_resb(true);
     mtram_resb(false);
-    ASSERT_TRUE(state().status_hidden);
+    ASSERT_FALSE(state().gate);
 
     c = (sst_cursor_t){blob, blob + sizeof blob, false};
     ASSERT_TRUE(mtram_sst_load(&c, 0));
-    ASSERT_FALSE(state().status_hidden);
+    ASSERT_TRUE(state().gate);
     ASSERT_EQ(rd(SLOT16), 0xAA);
     map(16, 101);
     ASSERT_NE(rd(SLOT16), 0xAA);
@@ -429,7 +453,7 @@ UTEST(mtram, the_debugger_sees_the_state)
     ASSERT_EQ(st.active_task, 2);
     ASSERT_EQ(st.edit_task, 2);
     ASSERT_EQ(st.knock_pos, 4);
-    ASSERT_EQ(st.temp, 50);
+    ASSERT_EQ(st.temp, 2500);
     ASSERT_EQ(st.active_map[16], 100);
     ASSERT_EQ(st.task_map[2][16], 100);
     ASSERT_EQ(st.task_map[0][16], 16);

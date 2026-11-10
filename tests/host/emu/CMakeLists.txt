@@ -91,6 +91,7 @@ foreach(_case
     "mtram_temp_without_mtram;--mtram-temp;30"
     "mtram_delay_without_mtram;--mtram-delay;10"
     "mtram_temp_range;--mtram;--mtram-temp;200"
+    "mtram_temp_below;--mtram;--mtram-temp=-50"
     "mtram_delay_range;--mtram;--mtram-delay;2000000"
     "drive_without_folder;--drive;MSC0"
     "drive_bad_name;--drive;C=."
@@ -118,7 +119,7 @@ rp6502_add_cli_test(no_mirror --mtram --no-mirror --frames 60
     --screenshot ${CMAKE_CURRENT_BINARY_DIR}/no_mirror.png ${MTRAM_ROM})
 set_tests_properties(cli_no_mirror PROPERTIES FAIL_REGULAR_EXPRESSION "DONE")
 
-rp6502_add_cli_test(mtram --mtram --mtram-temp 45.5 --mtram-delay 100
+rp6502_add_cli_test(mtram --mtram --mtram-temp=-12.5 --mtram-delay 100
     --crc --frames 10 ${RP6502_TEST_CORPUS}/mode3_8bpp.rp6502)
 set_tests_properties(cli_mtram PROPERTIES PASS_REGULAR_EXPRESSION
     "^[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]\n")

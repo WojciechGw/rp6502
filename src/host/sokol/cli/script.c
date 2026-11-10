@@ -28,6 +28,7 @@
 #include "core/com/com.h"
 #include "core/wdc/cpu.h"
 #include "core/wdc/sram.h"
+#include "core/wdc/mtram.h"
 #include "core/wdc/via.h"
 #include "core/ria/ria.h"
 #include "core/sys/xram.h"
@@ -734,11 +735,13 @@ static bool script_assign(const char *name, size_t len, char *expr)
     return true;
 }
 
-/* Nothing answers a read of $FF00-$FFCF or takes a write there. */
+/* Nothing answers a read of $FF00-$FFCF or takes a write there, except
+ * mtRAM's register window. */
 static bool script_unassigned(script_space_t space, long addr)
 {
+    long lo = mtram_on ? MTRAM_REG_WINDOW_LAST : SRAM_MMAP_HI;
     return (space == SCRIPT_CPU || space == SCRIPT_BUS) &&
-           addr > SRAM_MMAP_HI && addr < VIA_MMAP_LO;
+           addr > lo && addr < VIA_MMAP_LO;
 }
 
 /* bus: and xbus: are stores, so peek, dump and wait refuse them. */

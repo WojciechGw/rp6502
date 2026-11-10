@@ -7,6 +7,7 @@
 #include "core/wdc/bus.h"
 #include "core/dap/dbg.h"
 #include "core/wdc/sram.h"
+#include "core/wdc/mtram.h"
 #include "core/ria/ria.h"
 #include "core/wdc/phi2.h"
 #include "core/sys/sys.h"
@@ -131,8 +132,8 @@ static inline void bus_park(uint16_t addr, uint8_t data, bool read,
 
 /* One PHI2 cycle of everything on the bus. The CPU is the only bus master, so
  * it must tick first and drive the address before the devices answer. Only
- * $0000-$FEFF, $FFD0-$FFDF and $FFE0-$FFFF answer a read, so no two devices
- * drive data in the same cycle. */
+ * $0000-$FEFF (with mtRAM, $0000-$FF7F), $FFD0-$FFDF and $FFE0-$FFFF answer
+ * a read, so no two devices drive data in the same cycle. */
 static inline void bus_tick(uint16_t *addr, uint8_t *data, bool *read,
                             bool *via_irq, bool *ria_irq)
 {
@@ -191,8 +192,10 @@ static void run_until(uint64_t lines)
             if (cpu_dbg_cycle_cb)
                 cpu_dbg_cycle_cb(cpu_dbg_pins());
             /* The same condition sram_tick uses: every write lands in sram[],
-             * whatever the address, but only $0000-$FEFF answers a read. */
-            if (dbg_watch_armed && (!read || addr <= SRAM_MMAP_HI))
+             * whatever the address, but only $0000-$FEFF answers a read, and
+             * mtRAM's window up to $FF7F. */
+            if (dbg_watch_armed &&
+                (!read || addr <= (mtram_on ? MTRAM_REG_WINDOW_LAST : SRAM_MMAP_HI)))
                 dbg_watch_access(addr, data, !read);
             uint16_t pc;
             uint8_t sp;

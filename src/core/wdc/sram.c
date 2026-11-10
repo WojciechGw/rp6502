@@ -56,7 +56,7 @@ void sram_init(void)
  * space for the debug memory views and the ROM loader. Only $0000-$FEFF drives
  * the bus on a read (os.rst): above that the VIA and the RIA answer, and the
  * unassigned $FF00-$FFCF reads as open bus, so data keeps whatever the CPU
- * left there. */
+ * left there. mtRAM answers its window $FF00-$FF7F itself. */
 void sram_tick(uint16_t addr, bool read, uint8_t *data)
 {
     if (mtram_on)
