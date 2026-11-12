@@ -93,7 +93,8 @@ const uint8_t *mtram_dbg_block(uint8_t block);
 void mtram_sst_save(sst_cursor_t *c, unsigned flags);
 bool mtram_sst_load(sst_cursor_t *c, unsigned flags);
 
-#define MTRAM_DRIVER DRIVER(nul_init, mtram_task, nul_task, nul_run, nul_stop, nul_break, \
-    nul_config, nul_config, SST(MTRM, 3, MTRAM_SST_SIZE, mtram_sst_save, mtram_sst_load))
+#define MTRAM_DRIVER DRIVER(                                  \
+    TASK_PUMPED(mtram_task)                                   \
+    SST(MTRM, 3, MTRAM_SST_SIZE, mtram_sst_save, mtram_sst_load))
 
 #endif /* _CORE_WDC_MTRAM_H_ */
