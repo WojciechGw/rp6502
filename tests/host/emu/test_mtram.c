@@ -275,6 +275,41 @@ UTEST(mtram, the_signature_comes_back_after_a_write)
     ASSERT_TRUE(signed_off());
 }
 
+static unsigned rd16(uint16_t reg)
+{
+    return rd(reg) | (unsigned)rd((uint16_t)(reg + 1)) << 8;
+}
+
+UTEST(mtram, the_info_block_says_what_answers)
+{
+    fresh(0);
+    ASSERT_EQ(rd(MTRAM_REG_INFO), MTRAM_INFO_VERSION);
+    ASSERT_EQ(rd16(MTRAM_REG_INFO_RAM_KB), 512u);
+    ASSERT_EQ(rd16(MTRAM_REG_INFO_CLOCK), 0u);
+    ASSERT_EQ(rd(MTRAM_REG_INFO_VREG), 0);
+    ASSERT_EQ(rd(MTRAM_REG_INFO_SETTLE), 0xFF);
+    ASSERT_EQ(rd(MTRAM_REG_INFO_GUARD), 0xFF);
+    ASSERT_EQ(rd(MTRAM_REG_INFO_OPT_B), MTRAM_INFO_B_EMULATOR);
+    ASSERT_EQ(rd(MTRAM_REG_INFO_OPT_A), 0x57);
+    uint8_t month = rd(MTRAM_REG_INFO_DATE + 1);
+    uint8_t day = rd(MTRAM_REG_INFO_DATE + 2);
+    ASSERT_TRUE(rd(MTRAM_REG_INFO_DATE) >= 26);
+    ASSERT_TRUE(month >= 1 && month <= 12 && day >= 1 && day <= 31);
+
+    // Written over anywhere in $FF70-$FF7F, it all comes back.
+    wr(MTRAM_REG_INFO_DATE + 1, 0x00);
+    ASSERT_EQ(rd(MTRAM_REG_INFO_DATE + 1), month);
+    wr(MTRAM_REG_INFO_FIRST, 0xEE);
+    ASSERT_EQ(rd(MTRAM_REG_INFO_VREG), 0);
+    wr(MTRAM_REG_INFO, 0x00);
+    ASSERT_EQ(rd(MTRAM_REG_INFO), MTRAM_INFO_VERSION);
+    ASSERT_TRUE(signed_off());
+
+    // The byte below it is a plain one.
+    wr(MTRAM_REG_INFO_FIRST - 1, 0x11);
+    ASSERT_EQ(rd(MTRAM_REG_INFO_FIRST - 1), 0x11);
+}
+
 UTEST(mtram, no_delay_takes_effect_on_the_next_cycle)
 {
     fresh(0);

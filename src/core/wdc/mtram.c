@@ -101,8 +101,39 @@ static void mtram_store16(uint16_t reg, int16_t v)
     sram[reg + 1] = (uint8_t)((uint16_t)v >> 8);
 }
 
+/* __DATE__ is "Nov 14 2026". */
+static uint8_t mtram_build_month(void)
+{
+    static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    for (uint8_t m = 0; m < 12; m++)
+        if (!memcmp(&months[m * 3], __DATE__, 3))
+            return (uint8_t)(m + 1);
+    return 0;
+}
+
+/* The info block and the signature, $FF70-$FF7F, which the module writes and
+ * puts back together. The emulator says what it models -- the production
+ * image's options, 512 KB -- with the emulator's bit, and leaves out what it
+ * has no counterpart for: voltage 0, clock 0, no settle or guard. */
 static void mtram_signature_write(void)
 {
+    const char *d = __DATE__;
+    sram[MTRAM_REG_INFO_VREG] = 0;
+    sram[MTRAM_REG_INFO_DATE] = (uint8_t)((d[9] - '0') * 10 + (d[10] - '0'));
+    sram[MTRAM_REG_INFO_DATE + 1] = mtram_build_month();
+    sram[MTRAM_REG_INFO_DATE + 2] =
+        (uint8_t)((d[4] == ' ' ? 0 : (d[4] - '0') * 10) + (d[5] - '0'));
+    sram[MTRAM_REG_INFO_OPT_B] = MTRAM_INFO_B_EMULATOR;
+    sram[MTRAM_REG_INFO_OPT_A] = MTRAM_INFO_A_PHI2_SYNC | MTRAM_INFO_A_SYNC_BYP |
+                                 MTRAM_INFO_A_RESB | MTRAM_INFO_A_TEMP |
+                                 MTRAM_INFO_A_SPARSE;
+    sram[MTRAM_REG_INFO_GUARD] = 0xFF;
+    sram[MTRAM_REG_INFO_SETTLE] = 0xFF;
+    sram[MTRAM_REG_INFO_RAM_KB] = (uint8_t)(MTRAM_BLOCKS * 2);
+    sram[MTRAM_REG_INFO_RAM_KB + 1] = (uint8_t)(MTRAM_BLOCKS * 2 >> 8);
+    sram[MTRAM_REG_INFO_CLOCK] = 0;
+    sram[MTRAM_REG_INFO_CLOCK + 1] = 0;
+    sram[MTRAM_REG_INFO] = MTRAM_INFO_VERSION;
     sram[MTRAM_REG_SIGNATURE] = 'm';
     sram[MTRAM_REG_SIGNATURE + 1] = 't';
     sram[MTRAM_REG_SIGNATURE + 2] = 'R';
@@ -148,12 +179,12 @@ static void mtram_knock_feed(uint8_t data)
 static bool mtram_is_control(uint16_t addr)
 {
     return (addr >= MTRAM_REG_BANK_BASE && addr <= MTRAM_REG_EDIT) ||
-           (addr >= MTRAM_REG_SIGNATURE && addr <= MTRAM_REG_WINDOW_LAST);
+           (addr >= MTRAM_REG_INFO_FIRST && addr <= MTRAM_REG_WINDOW_LAST);
 }
 
 static void mtram_control(uint16_t addr, uint8_t data)
 {
-    if (addr >= MTRAM_REG_SIGNATURE)
+    if (addr >= MTRAM_REG_INFO_FIRST)
     {
         mtram_signature_write();
         return;

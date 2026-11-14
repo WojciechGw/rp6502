@@ -43,6 +43,27 @@
 #define MTRAM_REG_TEMP_CURR 0xFF24
 #define MTRAM_REG_TEMP_MIN 0xFF26
 #define MTRAM_REG_TEMP_MAX 0xFF28
+/* The info block, $FF70-$FF7C: what answers there. Voltage in 10 mV, the
+ * build date (year - 2000, month, day), option bits B and A, guard and settle
+ * cycles ($FF for none), RAM in KB and clock in MHz (16 bits each, low byte
+ * first, clock 0 for unknown), and the block's format in $FF7C. */
+#define MTRAM_REG_INFO_FIRST 0xFF70
+#define MTRAM_REG_INFO_VREG 0xFF70
+#define MTRAM_REG_INFO_DATE 0xFF71
+#define MTRAM_REG_INFO_OPT_B 0xFF74
+#define MTRAM_REG_INFO_OPT_A 0xFF75
+#define MTRAM_REG_INFO_GUARD 0xFF76
+#define MTRAM_REG_INFO_SETTLE 0xFF77
+#define MTRAM_REG_INFO_RAM_KB 0xFF78
+#define MTRAM_REG_INFO_CLOCK 0xFF7A
+#define MTRAM_REG_INFO 0xFF7C
+#define MTRAM_INFO_VERSION 1
+#define MTRAM_INFO_A_PHI2_SYNC 0x01
+#define MTRAM_INFO_A_SYNC_BYP 0x02
+#define MTRAM_INFO_A_RESB 0x04
+#define MTRAM_INFO_A_TEMP 0x10
+#define MTRAM_INFO_A_SPARSE 0x40
+#define MTRAM_INFO_B_EMULATOR 0x80
 /* "mtR", which open bus cannot read as. */
 #define MTRAM_REG_SIGNATURE 0xFF7D
 
