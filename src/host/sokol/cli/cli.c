@@ -76,7 +76,7 @@ enum
     OPT_INSTALL, OPT_SAVE_DIR, OPT_BGCOLOR, OPT_PHI2, OPT_CP, OPT_MEMSEED, OPT_MEMFILL,
     OPT_MUTE, OPT_DEBUG, OPT_DAP, OPT_CREDITS, OPT_VERSION, OPT_INI,
     OPT_CRC, OPT_HEADLESS, OPT_STDIN, OPT_ASPECT, OPT_MTRAM, OPT_MTRAM_TEMP,
-    OPT_MTRAM_DELAY, OPT_DRIVE, OPT_NO_MIRROR,
+    OPT_MTRAM_DELAY, OPT_MTRAM_DS18B20, OPT_DRIVE, OPT_NO_MIRROR,
 };
 static const struct option longopts[] = {
     {"help",         no_argument,       NULL, OPT_HELP},
@@ -105,10 +105,14 @@ static const struct option longopts[] = {
     {"mtram",        no_argument,       NULL, OPT_MTRAM},
     {"mtram-temp",   required_argument, NULL, OPT_MTRAM_TEMP},
     {"mtram-delay",  required_argument, NULL, OPT_MTRAM_DELAY},
+    {"mtram-ds18b20", required_argument, NULL, OPT_MTRAM_DS18B20},
     {"drive",        required_argument, NULL, OPT_DRIVE},
     {"no-mirror",    no_argument,       NULL, OPT_NO_MIRROR},
     {NULL, 0, NULL, 0},
 };
+
+_Static_assert(sizeof(((cli_options *)0)->mtram_ds18b20) / sizeof(double) == MTRAM_OW_DEVICES,
+               "one --mtram-ds18b20 for each device the line holds");
 
 void cli_usage(FILE *out, const char *argv0)
 {
@@ -169,6 +173,9 @@ void cli_usage(FILE *out, const char *argv0)
             "                            (-40 to 125, default 25)\n"
             "  --mtram-delay <cycles>    PHI2 cycles before a write to its registers\n"
             "                            $FF00-$FF21 takes effect (0-1000000, default 0)\n"
+            "  --mtram-ds18b20 <C>       a DS18B20 at that temperature on its 1-Wire\n"
+            "                            line (-55 to 125); repeatable, up to 8, found\n"
+            "                            in the order given (default: an empty line)\n"
             "  -- <args...>              pass the remaining words to the ROM as argv[1..]\n",
             argv0);
 }
@@ -354,6 +361,21 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
                 return cli_bad("--mtram-delay", optarg), 2;
             o->mtram_delay = (uint32_t)v;
             o->have_mtram_delay = true;
+            break;
+        }
+        case OPT_MTRAM_DS18B20:
+        {
+            char *end;
+            double t = strtod(optarg, &end);
+            if (end == optarg || *end || !(t >= MTRAM_DS_TEMP_MIN_C && t <= MTRAM_DS_TEMP_MAX_C))
+                return cli_bad("--mtram-ds18b20", optarg), 2;
+            if (o->n_mtram_ds18b20 == MTRAM_OW_DEVICES)
+            {
+                fprintf(stderr, "rp6502-emu: too many --mtram-ds18b20 (max %d)\n",
+                        MTRAM_OW_DEVICES);
+                return 2;
+            }
+            o->mtram_ds18b20[o->n_mtram_ds18b20++] = t;
             break;
         }
         case OPT_MUTE: o->mute = true; break;

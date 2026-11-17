@@ -8,8 +8,9 @@
  * The mtRAM module in the 6502's SRAM socket: 512 KB in
  * 2 KB blocks, mapped into the 6502's 32 slots through one of 16 task maps
  * and driven by its register window $FF00-$FF7F in the I/O page. Modelled
- * after its firmware built with SRAM_PHI2_SYNC, SRAM_RESET_DETECT=RESB and
- * the legacy knock protocol, on a board whose VIA is decoded to $FFD0-$FFDF.
+ * after its firmware built with SRAM_PHI2_SYNC, SRAM_RESET_DETECT=RESB,
+ * SRAM_ONEWIRE and the legacy knock protocol, on a board whose VIA is decoded
+ * to $FFD0-$FFDF.
  * Blocks 0-31 are sram[], so the identity map is the plain machine, and the
  * window's bytes are block 31's.
  */
@@ -43,6 +44,37 @@
 #define MTRAM_REG_TEMP_CURR 0xFF24
 #define MTRAM_REG_TEMP_MIN 0xFF26
 #define MTRAM_REG_TEMP_MAX 0xFF28
+/* The 1-Wire line of SRAM_ONEWIRE, on in the production image. A non-zero
+ * write to DS_CTRL measures every DS18B20 on it: COUNT sensors, their
+ * temperatures as signed hundredths, low byte first, DS_TEMP_NONE for a bad
+ * read, and their ROM codes, then DS_CTRL reads 0. */
+#define MTRAM_REG_DS_CTRL 0xFF2A
+#define MTRAM_REG_DS_COUNT 0xFF2B
+#define MTRAM_REG_DS_TEMP 0xFF2C
+#define MTRAM_REG_DS_ROM 0xFF34
+#define MTRAM_DS_MAX 4
+#define MTRAM_DS_TEMP_NONE 0x8000
+/* The bus mailbox: the line byte by byte for a program. An OW_OP_* written to
+ * XFER_CTRL runs with FLAGS, TXLEN, RXLEN and BUF, then STATUS is written and
+ * XFER_CTRL reads 0. */
+#define MTRAM_REG_XFER_CTRL 0xFF54
+#define MTRAM_REG_XFER_STATUS 0xFF55
+#define MTRAM_REG_XFER_FLAGS 0xFF56
+#define MTRAM_REG_XFER_TXLEN 0xFF58
+#define MTRAM_REG_XFER_RXLEN 0xFF59
+#define MTRAM_REG_XFER_BUF 0xFF5A
+#define MTRAM_XFER_BUF_MAX 22
+#define MTRAM_OW_OP_TRANSACT 1
+#define MTRAM_OW_OP_FIRST 2
+#define MTRAM_OW_OP_NEXT 3
+#define MTRAM_OW_ST_NOPRESENCE 0x01
+#define MTRAM_OW_ST_END 0x02
+#define MTRAM_XFER_ST_BADOP 0x40
+#define MTRAM_OW_FLAG_NORESET 0x01
+/* DS18B20 a session can put on the line, and the range they measure. */
+#define MTRAM_OW_DEVICES 8
+#define MTRAM_DS_TEMP_MIN_C -55.0
+#define MTRAM_DS_TEMP_MAX_C 125.0
 /* The info block, $FF70-$FF7C: what answers there. Voltage in 10 mV, the
  * build date (year - 2000, month, day), option bits B and A, guard and settle
  * cycles ($FF for none), RAM in KB and clock in MHz (16 bits each, low byte
@@ -63,6 +95,7 @@
 #define MTRAM_INFO_A_RESB 0x04
 #define MTRAM_INFO_A_TEMP 0x10
 #define MTRAM_INFO_A_SPARSE 0x40
+#define MTRAM_INFO_A_ONEWIRE 0x80
 #define MTRAM_INFO_B_EMULATOR 0x80
 /* "mtR", which open bus cannot read as. */
 #define MTRAM_REG_SIGNATURE 0xFF7D
@@ -77,6 +110,9 @@ extern bool mtram_on;
 void mtram_set_enabled(bool on);
 void mtram_set_temperature(double celsius);
 void mtram_set_delay(uint32_t cycles);
+/* The DS18B20 on the 1-Wire line, n of them at most MTRAM_OW_DEVICES, found
+ * by a search in the order given; none leaves the line empty. */
+void mtram_set_ds18b20(const double *celsius, unsigned n);
 
 /* The ext blocks get the fill sram_init gives sram[]. */
 void mtram_init_memory(bool random, uint8_t value, uint32_t seed);
@@ -109,13 +145,18 @@ typedef struct
 void mtram_dbg_get(mtram_dbg_t *out);
 const uint8_t *mtram_dbg_block(uint8_t block);
 
+/* Each device's line state, then the line's job, its waiting requests, the
+ * mailbox search's place and the results the job publishes when it ends. */
+#define MTRAM_OW_SST_SIZE (MTRAM_OW_DEVICES * 20 + 8 + 8 + 1 + 1 + 10 * MTRAM_DS_MAX + \
+                           2 + MTRAM_XFER_BUF_MAX)
 #define MTRAM_SST_SIZE ((MTRAM_BLOCKS - MTRAM_SLOTS) * MTRAM_BLOCK_SIZE + MTRAM_SLOTS + \
-                      MTRAM_TASKS * MTRAM_SLOTS + 6 + 8 + 3 + MTRAM_QUEUE_LEN * 7)
+                      MTRAM_TASKS * MTRAM_SLOTS + 6 + 8 + 3 + MTRAM_QUEUE_LEN * 7 +   \
+                      MTRAM_OW_SST_SIZE)
 void mtram_sst_save(sst_cursor_t *c, unsigned flags);
 bool mtram_sst_load(sst_cursor_t *c, unsigned flags);
 
 #define MTRAM_DRIVER DRIVER(                                  \
     TASK_PUMPED(mtram_task)                                   \
-    SST(MTRM, 3, MTRAM_SST_SIZE, mtram_sst_save, mtram_sst_load))
+    SST(MTRM, 4, MTRAM_SST_SIZE, mtram_sst_save, mtram_sst_load))
 
 #endif /* _CORE_WDC_MTRAM_H_ */

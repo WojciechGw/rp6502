@@ -10,6 +10,7 @@
  */
 
 #include "core/wdc/mtram.h"
+#include "core/wdc/phi2.h"
 #include "core/wdc/sram.h"
 #include "utest.h"
 #include <string.h>
@@ -290,7 +291,7 @@ UTEST(mtram, the_info_block_says_what_answers)
     ASSERT_EQ(rd(MTRAM_REG_INFO_SETTLE), 0xFF);
     ASSERT_EQ(rd(MTRAM_REG_INFO_GUARD), 0xFF);
     ASSERT_EQ(rd(MTRAM_REG_INFO_OPT_B), MTRAM_INFO_B_EMULATOR);
-    ASSERT_EQ(rd(MTRAM_REG_INFO_OPT_A), 0x57);
+    ASSERT_EQ(rd(MTRAM_REG_INFO_OPT_A), 0xD7);
     uint8_t month = rd(MTRAM_REG_INFO_DATE + 1);
     uint8_t day = rd(MTRAM_REG_INFO_DATE + 2);
     ASSERT_TRUE(rd(MTRAM_REG_INFO_DATE) >= 26);
@@ -494,6 +495,271 @@ UTEST(mtram, the_debugger_sees_the_state)
     ASSERT_EQ(st.task_map[0][16], 16);
     ASSERT_EQ(mtram_dbg_block(100)[0], 0xAA);
     ASSERT_TRUE(mtram_dbg_block(16) == &sram[SLOT16]);
+}
+
+/* The 1-Wire line. At 1000 kHz a cycle is a microsecond. */
+
+#define OW_KHZ 1000
+#define OW_CONVERT 750000u
+
+static void ow_fresh(unsigned n, const double *celsius)
+{
+    phi2_set_khz_run(OW_KHZ);
+    mtram_set_ds18b20(celsius, n);
+    fresh(0);
+}
+
+/* Cycles until reg reads 0, or 0 if it never does within two seconds. */
+static unsigned ow_wait(uint16_t reg)
+{
+    for (unsigned n = 1; n <= 2000000; n++)
+        if (!rd(reg))
+            return n;
+    return 0;
+}
+
+static void mb_buf(const uint8_t *tx, unsigned n)
+{
+    for (unsigned i = 0; i < n; i++)
+        wr((uint16_t)(MTRAM_REG_XFER_BUF + i), tx[i]);
+}
+
+/* STATUS of a transaction, or 0xEE if it never ended. */
+static uint8_t mb_transact(uint8_t flags, const uint8_t *tx, unsigned n_tx, unsigned n_rx)
+{
+    mb_buf(tx, n_tx);
+    wr(MTRAM_REG_XFER_FLAGS, flags);
+    wr(MTRAM_REG_XFER_TXLEN, (uint8_t)n_tx);
+    wr(MTRAM_REG_XFER_RXLEN, (uint8_t)n_rx);
+    wr(MTRAM_REG_XFER_CTRL, MTRAM_OW_OP_TRANSACT);
+    return ow_wait(MTRAM_REG_XFER_CTRL) ? rd(MTRAM_REG_XFER_STATUS) : 0xEE;
+}
+
+static uint8_t mb_op(uint8_t op)
+{
+    wr(MTRAM_REG_XFER_CTRL, op);
+    return ow_wait(MTRAM_REG_XFER_CTRL) ? rd(MTRAM_REG_XFER_STATUS) : 0xEE;
+}
+
+static uint8_t ow_crc(const uint8_t *p, unsigned n)
+{
+    uint8_t crc = 0;
+    while (n--)
+    {
+        uint8_t in = *p++;
+        for (unsigned i = 0; i < 8; i++, in >>= 1)
+        {
+            bool mix = (crc ^ in) & 1;
+            crc >>= 1;
+            if (mix)
+                crc ^= 0x8C;
+        }
+    }
+    return crc;
+}
+
+static void buf(uint8_t *out, unsigned n)
+{
+    for (unsigned i = 0; i < n; i++)
+        out[i] = rd((uint16_t)(MTRAM_REG_XFER_BUF + i));
+}
+
+UTEST(mtram, a_measurement_reads_every_sensor)
+{
+    const double t[] = {21.5, -10.125};
+    ow_fresh(2, t);
+    wr(MTRAM_REG_DS_CTRL, 1);
+    ASSERT_EQ(rd(MTRAM_REG_DS_CTRL), 1);
+    unsigned took = ow_wait(MTRAM_REG_DS_CTRL);
+    ASSERT_TRUE(took > OW_CONVERT && took < OW_CONVERT + 100000);
+    ASSERT_EQ(rd(MTRAM_REG_DS_COUNT), 2);
+    ASSERT_EQ(reg16(MTRAM_REG_DS_TEMP), 2150);
+    ASSERT_EQ(reg16(MTRAM_REG_DS_TEMP + 2), -1012); /* -162 sixteenths, as the module divides */
+    for (unsigned s = 0; s < 2; s++)
+    {
+        const uint8_t *rom = &sram[MTRAM_REG_DS_ROM + 8 * s];
+        ASSERT_EQ(rom[0], 0x28);
+        ASSERT_EQ(ow_crc(rom, 8), 0);
+        ASSERT_EQ(rom[1], s ? 0x80 : 0x00); /* in the order given */
+    }
+}
+
+UTEST(mtram, a_measurement_without_sensors_finds_none)
+{
+    ow_fresh(0, NULL);
+    wr(MTRAM_REG_DS_COUNT, 9);
+    wr(MTRAM_REG_DS_CTRL, 1);
+    unsigned took = ow_wait(MTRAM_REG_DS_CTRL);
+    ASSERT_TRUE(took > 0 && took < 2000);
+    ASSERT_EQ(rd(MTRAM_REG_DS_COUNT), 0);
+}
+
+UTEST(mtram, a_measurement_takes_four_sensors)
+{
+    const double t[] = {1, 2, 3, 4, 5, 6};
+    ow_fresh(6, t);
+    wr(MTRAM_REG_DS_CTRL, 1);
+    ASSERT_TRUE(ow_wait(MTRAM_REG_DS_CTRL) > 0);
+    ASSERT_EQ(rd(MTRAM_REG_DS_COUNT), MTRAM_DS_MAX);
+    for (int s = 0; s < MTRAM_DS_MAX; s++)
+        ASSERT_EQ(reg16((uint16_t)(MTRAM_REG_DS_TEMP + 2 * s)), 100 * (s + 1));
+}
+
+UTEST(mtram, a_write_while_measuring_starts_nothing)
+{
+    const double t[] = {20};
+    ow_fresh(1, t);
+    wr(MTRAM_REG_DS_CTRL, 1);
+    unsigned whole = ow_wait(MTRAM_REG_DS_CTRL);
+    wr(MTRAM_REG_DS_CTRL, 1);
+    idle(1000);
+    wr(MTRAM_REG_DS_CTRL, 1);
+    unsigned rest = ow_wait(MTRAM_REG_DS_CTRL);
+    ASSERT_TRUE(whole > OW_CONVERT);
+    ASSERT_EQ(rest + 1001, whole);
+}
+
+UTEST(mtram, the_mailbox_search_lists_the_line)
+{
+    const double t[] = {20, 21, 22};
+    ow_fresh(3, t);
+    uint8_t rom[8];
+    for (unsigned s = 0; s < 3; s++)
+    {
+        ASSERT_EQ(mb_op(s ? MTRAM_OW_OP_NEXT : MTRAM_OW_OP_FIRST), 0);
+        buf(rom, 8);
+        ASSERT_EQ(rom[0], 0x28);
+        ASSERT_EQ(ow_crc(rom, 8), 0);
+        ASSERT_EQ(rom[1], (uint8_t)(s == 0 ? 0x00 : s == 1 ? 0x80 : 0x40));
+    }
+    ASSERT_EQ(mb_op(MTRAM_OW_OP_NEXT), MTRAM_OW_ST_END);
+    ASSERT_EQ(mb_op(MTRAM_OW_OP_FIRST), 0);
+    buf(rom, 8);
+    ASSERT_EQ(rom[1], 0x00);
+
+    ow_fresh(0, NULL);
+    ASSERT_EQ(mb_op(MTRAM_OW_OP_FIRST), MTRAM_OW_ST_NOPRESENCE | MTRAM_OW_ST_END);
+    ASSERT_EQ(mb_transact(0, NULL, 0, 1), MTRAM_OW_ST_NOPRESENCE);
+}
+
+UTEST(mtram, the_mailbox_reads_a_scratchpad)
+{
+    const double t[] = {30.0};
+    const uint8_t read[] = {0xCC, 0xBE};
+    const uint8_t convert[] = {0xCC, 0x44};
+    uint8_t pad[9];
+    ow_fresh(1, t);
+
+    /* Before any conversion: the 85 °C it powers up with. */
+    ASSERT_EQ(mb_transact(0, read, 2, 9), 0);
+    buf(pad, 9);
+    ASSERT_EQ(pad[0], 0x50);
+    ASSERT_EQ(pad[1], 0x05);
+    ASSERT_EQ(ow_crc(pad, 9), 0);
+
+    /* Busy reads 0 until the conversion is done, and the reading is there. */
+    ASSERT_EQ(mb_transact(0, convert, 2, 1), 0);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_BUF), 0x00);
+    idle(OW_CONVERT);
+    ASSERT_EQ(mb_transact(MTRAM_OW_FLAG_NORESET, NULL, 0, 1), 0);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_BUF), 0xFF);
+    ASSERT_EQ(mb_transact(0, read, 2, 9), 0);
+    buf(pad, 9);
+    ASSERT_EQ(pad[0] | pad[1] << 8, 480);
+    ASSERT_EQ(ow_crc(pad, 9), 0);
+
+    /* The command and the read in two transactions, the second without a reset. */
+    ASSERT_EQ(mb_transact(0, read, 1, 0), 0);
+    ASSERT_EQ(mb_transact(MTRAM_OW_FLAG_NORESET, &read[1], 1, 2), 0);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_BUF), 0xE0);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_BUF + 1), 0x01);
+}
+
+UTEST(mtram, match_rom_picks_one_sensor)
+{
+    const double t[] = {10.0, 40.0};
+    const uint8_t convert[] = {0xCC, 0x44};
+    uint8_t tx[10] = {0x55};
+    ow_fresh(2, t);
+    ASSERT_EQ(mb_transact(0, convert, 2, 0), 0);
+    idle(OW_CONVERT);
+    ASSERT_EQ(mb_op(MTRAM_OW_OP_FIRST), 0);
+    ASSERT_EQ(mb_op(MTRAM_OW_OP_NEXT), 0);
+    buf(&tx[1], 8);
+    tx[9] = 0xBE;
+    ASSERT_EQ(mb_transact(0, tx, 10, 2), 0);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_BUF) | rd(MTRAM_REG_XFER_BUF + 1) << 8, 640);
+}
+
+UTEST(mtram, the_resolution_is_written_and_kept)
+{
+    const double t[] = {21.6875}; /* 347 sixteenths */
+    const uint8_t write[] = {0xCC, 0x4E, 0x4B, 0x46, 0x1F};
+    const uint8_t convert[] = {0xCC, 0x44};
+    const uint8_t read[] = {0xCC, 0xBE};
+    ow_fresh(1, t);
+    ASSERT_EQ(mb_transact(0, write, 5, 0), 0);
+    ASSERT_EQ(mb_transact(0, convert, 2, 0), 0);
+    idle(93750); /* 9 bits */
+    ASSERT_EQ(mb_transact(0, read, 2, 5), 0);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_BUF) | rd(MTRAM_REG_XFER_BUF + 1) << 8, 344);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_BUF + 4), 0x1F);
+}
+
+UTEST(mtram, the_mailbox_refuses_an_operation_it_lacks)
+{
+    const double t[] = {20};
+    ow_fresh(1, t);
+    wr(MTRAM_REG_XFER_BUF, 0x5A);
+    wr(MTRAM_REG_XFER_STATUS, 0xFF);
+    wr(MTRAM_REG_XFER_CTRL, 4);
+    idle(90);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_CTRL), 4);
+    unsigned took = ow_wait(MTRAM_REG_XFER_CTRL);
+    ASSERT_TRUE(took > 0 && took < 20);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_STATUS), MTRAM_XFER_ST_BADOP);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_BUF), 0x5A);
+}
+
+UTEST(mtram, the_mailbox_and_a_measurement_share_the_line)
+{
+    const double t[] = {20};
+    ow_fresh(1, t);
+    wr(MTRAM_REG_DS_CTRL, 1);
+    wr(MTRAM_REG_XFER_CTRL, 4);
+    ASSERT_TRUE(ow_wait(MTRAM_REG_DS_CTRL) > OW_CONVERT);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_CTRL), 4);
+    ASSERT_TRUE(ow_wait(MTRAM_REG_XFER_CTRL) > 0);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_STATUS), MTRAM_XFER_ST_BADOP);
+
+    wr(MTRAM_REG_XFER_CTRL, MTRAM_OW_OP_FIRST);
+    wr(MTRAM_REG_DS_CTRL, 1);
+    ASSERT_TRUE(ow_wait(MTRAM_REG_XFER_CTRL) > 0);
+    ASSERT_EQ(rd(MTRAM_REG_XFER_STATUS), 0);
+    ASSERT_EQ(rd(MTRAM_REG_DS_CTRL), 1);
+    ASSERT_TRUE(ow_wait(MTRAM_REG_DS_CTRL) > 0);
+    ASSERT_EQ(rd(MTRAM_REG_DS_COUNT), 1);
+}
+
+UTEST(mtram, a_savestate_carries_a_measurement)
+{
+    static uint8_t blob[MTRAM_SST_SIZE];
+    const double t[] = {20, 25};
+    ow_fresh(2, t);
+    wr(MTRAM_REG_DS_CTRL, 1);
+    idle(1000);
+    sst_cursor_t c = {blob, blob + sizeof blob, false};
+    mtram_sst_save(&c, 0);
+    ASSERT_TRUE(sst_ok(&c));
+    ASSERT_TRUE(c.at == c.end);
+
+    ow_fresh(2, t);
+    c = (sst_cursor_t){blob, blob + sizeof blob, false};
+    ASSERT_TRUE(mtram_sst_load(&c, 0));
+    sram[MTRAM_REG_DS_CTRL] = 1;
+    ASSERT_TRUE(ow_wait(MTRAM_REG_DS_CTRL) > 0);
+    ASSERT_EQ(rd(MTRAM_REG_DS_COUNT), 2);
+    ASSERT_EQ(reg16(MTRAM_REG_DS_TEMP + 2), 2500);
 }
 
 UTEST(mtram, off_is_the_plain_machine)

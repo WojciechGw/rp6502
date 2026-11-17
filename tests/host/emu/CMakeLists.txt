@@ -8,7 +8,8 @@ rp6502_add_script_test(NAME poke COMMAND poke.txt ${GAMEPAD_ROM})
 
 rp6502_add_script_test(NAME state COMMAND state.txt ${GAMEPAD_ROM})
 
-rp6502_add_script_test(NAME mtram COMMAND mtram.txt --mtram --mtram-temp 45.5 ${MTRAM_ROM})
+rp6502_add_script_test(NAME mtram COMMAND mtram.txt --mtram --mtram-temp 45.5
+    --mtram-ds18b20 21.5 --mtram-ds18b20=-10.125 ${MTRAM_ROM})
 
 set(DRIVE_DIR ${CMAKE_CURRENT_BINARY_DIR}/drive.msc0)
 file(REMOVE_RECURSE ${DRIVE_DIR})
@@ -102,6 +103,9 @@ foreach(_case
     "mtram_temp_range;--mtram;--mtram-temp;200"
     "mtram_temp_below;--mtram;--mtram-temp=-50"
     "mtram_delay_range;--mtram;--mtram-delay;2000000"
+    "mtram_ds18b20_without_mtram;--mtram-ds18b20;20"
+    "mtram_ds18b20_range;--mtram;--mtram-ds18b20;130"
+    "mtram_ds18b20_too_many;--mtram;--mtram-ds18b20;1;--mtram-ds18b20;2;--mtram-ds18b20;3;--mtram-ds18b20;4;--mtram-ds18b20;5;--mtram-ds18b20;6;--mtram-ds18b20;7;--mtram-ds18b20;8;--mtram-ds18b20;9"
     "drive_without_folder;--drive;MSC0"
     "drive_bad_name;--drive;C=."
     "drive_missing_folder;--drive;MSC0=no-such-folder"

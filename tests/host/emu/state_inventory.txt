@@ -290,11 +290,15 @@ core/wdc/mtram.c mtram_active_map: the MTRM chunk
 core/wdc/mtram.c mtram_active_task: the MTRM chunk
 core/wdc/mtram.c mtram_cycle: the MTRM chunk
 core/wdc/mtram.c mtram_delay: not carried: a session's mtRAM setting
+core/wdc/mtram.c mtram_ds: the MTRM chunk
+core/wdc/mtram.c mtram_ds_count: not carried: a session's mtRAM setting
+core/wdc/mtram.c mtram_ds_raw: not carried: a session's mtRAM setting
 core/wdc/mtram.c mtram_edit_task: the MTRM chunk
 core/wdc/mtram.c mtram_ext: the MTRM chunk
 core/wdc/mtram.c mtram_gate: the MTRM chunk
 core/wdc/mtram.c mtram_knock_pos: the MTRM chunk
 core/wdc/mtram.c mtram_on: not carried: a session's mtRAM setting
+core/wdc/mtram.c mtram_ow: the MTRM chunk
 core/wdc/mtram.c mtram_queue: the MTRM chunk
 core/wdc/mtram.c mtram_queue_count: the MTRM chunk
 core/wdc/mtram.c mtram_queue_head: the MTRM chunk

@@ -54,6 +54,8 @@ typedef struct
     bool have_mtram_temp;
     uint32_t mtram_delay;
     bool have_mtram_delay;
+    double mtram_ds18b20[8]; /* --mtram-ds18b20, MTRAM_OW_DEVICES of them */
+    int n_mtram_ds18b20;
     char **rom_args; /* the words after "--"; NULL when none was given */
     int n_rom_args;
 } cli_options;

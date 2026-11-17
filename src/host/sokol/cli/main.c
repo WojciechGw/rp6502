@@ -185,9 +185,10 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    if ((o.have_mtram_temp || o.have_mtram_delay) && !o.mtram)
+    if ((o.have_mtram_temp || o.have_mtram_delay || o.n_mtram_ds18b20) && !o.mtram)
     {
-        fprintf(stderr, "rp6502-emu: --mtram-temp and --mtram-delay need --mtram\n");
+        fprintf(stderr, "rp6502-emu: --mtram-temp, --mtram-delay and --mtram-ds18b20 "
+                        "need --mtram\n");
         return 2;
     }
     /* Under --headless and --stdin the host's streams are the program's own,
@@ -228,6 +229,7 @@ int main(int argc, char **argv)
     if (o.have_mtram_temp)
         mtram_set_temperature(o.mtram_temp);
     mtram_set_delay(o.mtram_delay);
+    mtram_set_ds18b20(o.mtram_ds18b20, (unsigned)o.n_mtram_ds18b20);
     /* Set before sys_init, which is where sram_init and xram_init fill. The
      * mtRAM module zeroes its whole backing store at power-on unless a fill is
      * asked for; XRAM is the RIA's and keeps the default. */
