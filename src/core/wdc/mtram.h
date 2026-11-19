@@ -157,6 +157,10 @@ bool mtram_sst_load(sst_cursor_t *c, unsigned flags);
 
 #define MTRAM_DRIVER DRIVER(                                  \
     TASK_PUMPED(mtram_task)                                   \
-    SST(MTRM, 4, MTRAM_SST_SIZE, mtram_sst_save, mtram_sst_load))
+    SST(.id = "MTRM",                                         \
+        .version = 4,                                         \
+        .size = MTRAM_SST_SIZE,                               \
+        .save = mtram_sst_save,                               \
+        .load = mtram_sst_load))
 
 #endif /* _CORE_WDC_MTRAM_H_ */
