@@ -10,6 +10,7 @@
 #include "core/term/term.h"
 #include "core/vga/pixel_format.h"
 #include "host/host.h"
+#include "machine.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -57,7 +58,7 @@ static void term_grids(term_t *t, grid_op_t op, uint8_t ch)
 
 // Show the primary or the alternate screen: the pen, and each grid's cursor
 // and line sizes, are that screen's from now on.
-static void term_show(term_t *t, bool alt)
+void term_show(term_t *t, bool alt)
 {
     t->alt_active = alt;
     t->cur = &t->pen[alt];
@@ -113,6 +114,8 @@ static void term_reset_core(term_t *t)
     t->protect_mode = TERM_PROTECT_OFF;
     t->erase_all = false;
     t->reverse_screen = false;
+    t->smooth_scroll = false;
+    t->smooth_released = false;
     t->cursor_enabled = true;
     t->cursor_style = 0;
     term_reset_parser(t);
@@ -599,9 +602,12 @@ static void term_out_DECRQM(term_t *t, bool private)
         case 2: // DECANM: ANSI mode, since this reply is ANSI
             pm = 1;
             break;
-        case 3: // DECCOLM: 80 columns only
-        case 4: // DECSCLM: no smooth scroll
-            pm = 4;
+        case 3: // DECCOLM: 80 columns, and never 132. The 40-column screen is
+                // neither of DECCOLM's two, so the mode is not reported there.
+            pm = term_shown(t)->width == 80 ? 4 : 0;
+            break;
+        case 4: // DECSCLM
+            pm = t->smooth_scroll ? 1 : 2;
             break;
         case 5: // DECSCNM
             pm = t->reverse_screen ? 1 : 2;
@@ -870,6 +876,10 @@ static void term_out_DECSET(term_t *t, bool set)
                 term_pen(t)->g1_charset = TERM_CS_ASCII;
                 term_pen(t)->gl_is_g1 = false;
             }
+            break;
+        case 4: // DECSCLM: smooth scroll
+            t->smooth_scroll = set;
+            t->smooth_released = false;
             break;
         case 5: // DECSCNM: the whole screen in reverse video
             t->reverse_screen = set;
@@ -1731,193 +1741,71 @@ void term_write(term_t *t, uint8_t ch)
     }
 }
 
-/* ---- savestate ----------------------------------------------------------
- *
- * Written field by field. term_pen_t has padding, and a struct copy would put
- * whatever is in it into the blob, where it would make two saves of one
- * unchanged machine differ. The grids are saved by their owner, with
- * term_grid_sst_put. */
-
-static void term_put_color(sst_cursor_t *c, const term_color_t *col)
+// The byte's effect on g's region, as far as a smooth scroll still moving
+// cares: true when it would scroll it again or set the margins.
+static bool HOST_IN_RAM_FUNC term_byte_scrolls(const term_t *t, const term_grid_t *g, uint8_t ch)
 {
-    sst_put_u8(c, col->kind);
-    sst_put_u8(c, col->index);
-    sst_put_u16(c, col->rgb);
-    sst_put_u8(c, col->r);
-    sst_put_u8(c, col->g);
-    sst_put_u8(c, col->b);
-}
-
-static void term_get_color(sst_cursor_t *c, term_color_t *col)
-{
-    col->kind = sst_get_u8(c);
-    col->index = sst_get_u8(c);
-    col->rgb = sst_get_u16(c);
-    col->r = sst_get_u8(c);
-    col->g = sst_get_u8(c);
-    col->b = sst_get_u8(c);
-}
-
-static void term_put_pen(sst_cursor_t *c, const term_pen_t *pen)
-{
-    sst_put_u8(c, pen->sgr_attr);
-    term_put_color(c, &pen->fg);
-    term_put_color(c, &pen->bg);
-    term_put_color(c, &pen->ul);
-    sst_put_bool(c, pen->ul_set);
-    sst_put_bool(c, pen->bold);
-    sst_put_bool(c, pen->faint);
-    sst_put_bool(c, pen->reverse);
-    sst_put_bool(c, pen->conceal);
-    sst_put_bool(c, pen->protect);
-    sst_put_bool(c, pen->origin_mode);
-    sst_put_u8(c, pen->g0_charset);
-    sst_put_u8(c, pen->g1_charset);
-    sst_put_bool(c, pen->gl_is_g1);
-}
-
-static void term_get_pen(sst_cursor_t *c, term_pen_t *pen)
-{
-    pen->sgr_attr = sst_get_u8(c);
-    term_get_color(c, &pen->fg);
-    term_get_color(c, &pen->bg);
-    term_get_color(c, &pen->ul);
-    pen->ul_set = sst_get_bool(c);
-    pen->bold = sst_get_bool(c);
-    pen->faint = sst_get_bool(c);
-    pen->reverse = sst_get_bool(c);
-    pen->conceal = sst_get_bool(c);
-    pen->protect = sst_get_bool(c);
-    pen->origin_mode = sst_get_bool(c);
-    pen->g0_charset = sst_get_u8(c);
-    pen->g1_charset = sst_get_u8(c);
-    pen->gl_is_g1 = sst_get_bool(c);
-}
-
-void term_sst_put(sst_cursor_t *c, const term_t *t)
-{
-    for (int s = 0; s < 2; s++)
-    {
-        term_put_pen(c, &t->pen[s]);
-        term_put_pen(c, &t->saved[s]);
-        sst_put_bool(c, t->has_saved[s]);
-    }
-    sst_put_bool(c, t->alt_active);
-    sst_put_bool(c, t->autowrap);
-    sst_put_bool(c, t->insert_mode);
-    sst_put_bool(c, t->newline_mode);
-    sst_put_bool(c, t->disp_ctrl);
-    sst_put_bool(c, t->vt52);
-    sst_put_bool(c, t->app_cursor);
-    sst_put_bool(c, t->app_keypad);
-    sst_put_bool(c, t->autorepeat);
-    sst_put_bool(c, t->ice_colors);
-    sst_put_bool(c, t->bracketed_paste);
-    sst_put_u8(c, t->modify_other_keys);
-    sst_put_bool(c, t->format_other_keys);
-    sst_put_bool(c, t->lr_margins);
-    sst_put_bool(c, t->rect_attrs);
-    sst_put_u8(c, t->protect_mode);
-    sst_put_bool(c, t->erase_all);
-    sst_put_bool(c, t->reverse_screen);
-    sst_put_bool(c, t->cursor_enabled);
-    sst_put_u8(c, t->cursor_style);
-    sst_put_u8(c, t->last_glyph);
-    sst_put_bool(c, t->rep_valid);
-    sst_put_u8(c, (uint8_t)t->ansi_state);
-    for (int i = 0; i < TERM_CSI_PARAM_MAX_LEN; i++)
-        sst_put_u16(c, t->csi_param[i]);
-    for (int i = 0; i < TERM_CSI_PARAM_MAX_LEN; i++)
-        sst_put_u8(c, (uint8_t)t->csi_separator[i]);
-    sst_put_u8(c, t->csi_param_count);
-    sst_put_u8(c, t->csi_private);
-    sst_put_u8(c, t->csi_intermediate);
-    sst_put_bool(c, t->csi_colon);
-    sst_put_bool(c, t->csi_any);
-    sst_put_bool(c, t->osc_pending);
-    sst_put_bool(c, t->dcs_pending);
-    sst_put_u16(c, t->osc_ps);
-    sst_put_u8(c, t->osc_stage);
-    sst_put_u8(c, t->osc_item);
-    sst_put_u16(c, t->osc_index);
-    sst_put_u8(c, t->osc_len);
-    sst_put(c, t->osc_spec, TERM_OSC_SPEC_MAX);
-    sst_put_u8(c, t->osc_asks);
-    for (int i = 0; i < TERM_OSC_ASK_MAX; i++)
-    {
-        sst_put_u16(c, t->osc_ask[i].which);
-        sst_put_u16(c, t->osc_ask[i].color);
-    }
-}
-
-/* The grids are the owner's and are left as they are. Everything that
- * indexes is bounded: the parser's counts their arrays, and osc_len the
- * spec it is filling. The alternate screen only
- * exists in a build that has one. */
-bool term_sst_get(sst_cursor_t *c, term_t *t)
-{
-    for (int s = 0; s < 2; s++)
-    {
-        term_get_pen(c, &t->pen[s]);
-        term_get_pen(c, &t->saved[s]);
-        t->has_saved[s] = sst_get_bool(c);
-    }
-    bool alt = sst_get_bool(c);
-    t->autowrap = sst_get_bool(c);
-    t->insert_mode = sst_get_bool(c);
-    t->newline_mode = sst_get_bool(c);
-    t->disp_ctrl = sst_get_bool(c);
-    t->vt52 = sst_get_bool(c);
-    t->app_cursor = sst_get_bool(c);
-    t->app_keypad = sst_get_bool(c);
-    t->autorepeat = sst_get_bool(c);
-    t->ice_colors = sst_get_bool(c);
-    t->bracketed_paste = sst_get_bool(c);
-    t->modify_other_keys = sst_get_u8(c);
-    t->format_other_keys = sst_get_bool(c);
-    t->lr_margins = sst_get_bool(c);
-    t->rect_attrs = sst_get_bool(c);
-    t->protect_mode = sst_get_u8(c);
-    t->erase_all = sst_get_bool(c);
-    t->reverse_screen = sst_get_bool(c);
-    t->cursor_enabled = sst_get_bool(c);
-    t->cursor_style = sst_get_u8(c);
-    t->last_glyph = sst_get_u8(c);
-    t->rep_valid = sst_get_bool(c);
-    uint8_t state = sst_get_u8(c);
-    for (int i = 0; i < TERM_CSI_PARAM_MAX_LEN; i++)
-        t->csi_param[i] = sst_get_u16(c);
-    for (int i = 0; i < TERM_CSI_PARAM_MAX_LEN; i++)
-        t->csi_separator[i] = (char)sst_get_u8(c);
-    t->csi_param_count = sst_get_u8(c);
-    t->csi_private = sst_get_u8(c);
-    t->csi_intermediate = sst_get_u8(c);
-    t->csi_colon = sst_get_bool(c);
-    t->csi_any = sst_get_bool(c);
-    t->osc_pending = sst_get_bool(c);
-    t->dcs_pending = sst_get_bool(c);
-    t->osc_ps = sst_get_u16(c);
-    t->osc_stage = sst_get_u8(c);
-    t->osc_item = sst_get_u8(c);
-    t->osc_index = sst_get_u16(c);
-    t->osc_len = sst_get_u8(c);
-    sst_get(c, t->osc_spec, TERM_OSC_SPEC_MAX);
-    t->osc_asks = sst_get_u8(c);
-    for (int i = 0; i < TERM_OSC_ASK_MAX; i++)
-    {
-        t->osc_ask[i].which = sst_get_u16(c);
-        t->osc_ask[i].color = sst_get_u16(c);
-    }
-    if (!sst_ok(c) || (alt && !TERM_ALT_SCREEN))
+    if (ch == TERM_C0_ESC)
         return false;
-    if (state >= ansi_state_count || t->protect_mode > TERM_PROTECT_ISO || t->modify_other_keys > 3 ||
-        t->csi_param_count > TERM_CSI_PARAM_MAX_LEN || t->osc_len > TERM_OSC_SPEC_MAX + 1 ||
-        t->osc_asks > TERM_OSC_ASK_MAX)
+    ansi_state_t state = t->ansi_state;
+    bool lf = ch == '\n' || ch == '\v' || ch == '\f';
+    if (state == ansi_state_ground)
+    {
+        if (lf)
+            return grid_index_scrolls(g);
+        bool glyph = ch >= 0x20 ? ch != TERM_DEL || t->disp_ctrl
+                     : t->disp_ctrl ? !(TERM_C0_ALWAYS & (1u << ch))
+                                    : !(TERM_C0_ACTION & (1u << ch));
+        return glyph && grid_glyph_scrolls(t, g);
+    }
+    // A line feed inside a sequence acts and the sequence goes on.
+    if (ch < 0x20)
+        return lf && (TERM_C0_IN_SEQ & (1u << ch)) && grid_index_scrolls(g);
+    switch (state)
+    {
+    case ansi_state_esc:
+        if (ch == 'D' || ch == 'E')
+            return grid_index_scrolls(g);
+        return ch == 'M' && grid_ri_scrolls(g);
+    case ansi_state_vt52_esc:
+        return ch == 'I' && grid_ri_scrolls(g);
+    case ansi_state_csi:
+        // DECSTBM waits, as on a VT100. So does REP, which can scroll many
+        // times in one sequence.
+        return (ch == 'r' || ch == 'b') && !t->csi_private && !t->csi_intermediate &&
+               !t->csi_colon;
+    default:
         return false;
+    }
+}
+
+void term_release_smooth(term_t *t)
+{
+    t->smooth_released = true;
+}
+
+bool HOST_IN_RAM_FUNC term_holds(const term_t *t, uint8_t ch)
+{
+    if (t->smooth_released)
+        return false;
+    for (uint8_t i = 0; i < t->grid_count; i++)
+        if (cells_smooth_busy(t->grids[i]) && term_byte_scrolls(t, t->grids[i], ch))
+            return true;
+    return false;
+}
+
+/* ---- savestate ---------------------------------------------------------- */
+
+/* Everything that indexes is bounded: the parser's counts their arrays, and
+ * osc_len the spec it is filling. */
+bool term_sst_ok(sst_cursor_t *c, const term_t *t)
+{
+    if (t->ansi_state >= ansi_state_count || t->protect_mode > TERM_PROTECT_ISO ||
+        t->modify_other_keys > 3 || t->csi_param_count > TERM_CSI_PARAM_MAX_LEN ||
+        t->osc_len > TERM_OSC_SPEC_MAX + 1 || t->osc_asks > TERM_OSC_ASK_MAX)
+        return sst_refuse(c, "the terminal's parser out of range");
     for (int i = 0; i < TERM_OSC_ASK_MAX; i++)
         if (t->osc_ask[i].which > CELLS_COLOR_CURSOR)
-            return false;
-    t->ansi_state = (ansi_state_t)state;
-    term_show(t, alt);
+            return sst_refuse(c, "an OSC answer for no color");
     return true;
 }

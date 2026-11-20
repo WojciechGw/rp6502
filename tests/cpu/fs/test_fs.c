@@ -101,6 +101,10 @@ static void make_file(const char *rel, const char *data, uint16_t n)
 #define AM_ARC 0x20
 
 
+/* More than the STD chunk holds, which sst.h's table gives only at run
+ * time. */
+#define STD_SST_MAX 8192
+
 UTEST(fs, drive_write_read_seek)
 {
     ASSERT_TRUE(fresh_cwd());
@@ -1162,7 +1166,9 @@ UTEST(fs, a_read_or_a_write_the_open_did_not_ask_for_fails_with_ebadf)
     ssys_close(w);
 }
 
-UTEST(fs, the_console_cannot_seek_or_sync)
+/* The console cannot seek. Its sync returns once what was written shows,
+ * which with nothing waiting is at once. */
+UTEST(fs, the_console_cannot_seek_and_syncs_at_once)
 {
     ASSERT_TRUE(fresh_cwd());
     ASSERT_EQ(ssys_lseek(0, 0, SEEK_SET), -1);
@@ -1170,8 +1176,7 @@ UTEST(fs, the_console_cannot_seek_or_sync)
     xstack_ptr = XSTACK_SIZE;
     API_A = 1;
     ssys_dispatch(std_api_syncfs);
-    ASSERT_EQ(dsys_ax(), -1);
-    ASSERT_EQ(ssys_errno(), api_platform_errno(API_EINVAL));
+    ASSERT_EQ(dsys_ax(), 0);
 }
 
 UTEST(fs, an_empty_path_fails_with_enoent)
@@ -1245,18 +1250,18 @@ UTEST(fs, a_file_open_for_writing_refuses_a_savestate)
         ASSERT_TRUE(fresh_cwd());
         int w = ssys_open(cases[i].path, O_WR | O_CREAT_);
         ASSERT_TRUE(w >= 0);
-        static uint8_t blob[STD_SST_SIZE];
-        sst_cursor_t c = {blob, blob + sizeof blob, false};
-        std_sst_save(&c, cases[i].flags);
+        static uint8_t blob[STD_SST_MAX];
+        sst_cursor_t c = {blob, blob + std_sst.size, false, NULL};
+        std_sst.save(&c, cases[i].flags);
         ASSERT_FALSE(sst_ok(&c));
         ASSERT_EQ(ssys_close(w), 0);
-        c = (sst_cursor_t){blob, blob + sizeof blob, false};
-        std_sst_save(&c, cases[i].flags);
+        c = (sst_cursor_t){blob, blob + std_sst.size, false, NULL};
+        std_sst.save(&c, cases[i].flags);
         ASSERT_TRUE(sst_ok(&c));
     }
 }
 
-static uint8_t g_blob[STD_SST_SIZE];
+static uint8_t g_blob[STD_SST_MAX];
 static int g_save_fd, g_plain_fd;
 
 /* A save and a plain file, each open with its position partway in, are
@@ -1275,8 +1280,8 @@ static bool take_two_files(unsigned flags, sst_cursor_t *c)
     if (g_save_fd < 0 || g_plain_fd < 0 ||
         ssys_read(g_save_fd, buf, 2) != 2 || ssys_read(g_plain_fd, buf, 3) != 3)
         return false;
-    *c = (sst_cursor_t){g_blob, g_blob + sizeof g_blob, false};
-    std_sst_save(c, flags);
+    *c = (sst_cursor_t){g_blob, g_blob + std_sst.size, false, NULL};
+    std_sst.save(c, flags);
     if (!sst_ok(c) || !fresh_cwd())
         return false;
     make_file("SAVE:slot.sav", "abcdefgh", 8);
@@ -1287,8 +1292,8 @@ UTEST(fs, a_savestate_reopens_a_save_by_its_name)
 {
     sst_cursor_t c;
     ASSERT_TRUE(take_two_files(0, &c));
-    sst_cursor_t r = {g_blob, c.at, false};
-    ASSERT_TRUE(std_sst_load(&r, 0));
+    sst_cursor_t r = {g_blob, c.at, false, NULL};
+    ASSERT_TRUE(std_sst.load(&r, 0));
 
     char buf[4] = {0};
     ASSERT_EQ(ssys_read(g_save_fd, buf, 2), 2);
@@ -1301,8 +1306,8 @@ UTEST(fs, a_shared_savestate_carries_saves_and_closes_host_files)
 {
     sst_cursor_t c;
     ASSERT_TRUE(take_two_files(SST_SHARED, &c));
-    sst_cursor_t r = {g_blob, c.at, false};
-    ASSERT_TRUE(std_sst_load(&r, SST_SHARED));
+    sst_cursor_t r = {g_blob, c.at, false, NULL};
+    ASSERT_TRUE(std_sst.load(&r, SST_SHARED));
 
     char buf[4] = {0};
     ASSERT_EQ(ssys_read(g_save_fd, buf, 2), 2);
@@ -1482,12 +1487,12 @@ UTEST(fs, a_savestate_keeps_two_descriptors_on_one_file)
     ASSERT_EQ(ssys_dup2(f, 0), 0);
     char buf[2] = {0};
     ASSERT_EQ(ssys_read(f, buf, 1), 1);
-    sst_cursor_t c = {g_blob, g_blob + sizeof g_blob, false};
-    std_sst_save(&c, 0);
+    sst_cursor_t c = {g_blob, g_blob + std_sst.size, false, NULL};
+    std_sst.save(&c, 0);
     ASSERT_TRUE(sst_ok(&c));
     std_reset();
-    sst_cursor_t r = {g_blob, c.at, false};
-    ASSERT_TRUE(std_sst_load(&r, 0));
+    sst_cursor_t r = {g_blob, c.at, false, NULL};
+    ASSERT_TRUE(std_sst.load(&r, 0));
     ASSERT_EQ(ssys_read(0, buf, 1), 1);
     ASSERT_EQ(buf[0], 'b');
     ASSERT_EQ(ssys_read(f, buf, 1), 1);
@@ -1509,15 +1514,15 @@ UTEST(fs, a_failed_load_closes_what_it_reopened)
     ASSERT_EQ(ssys_close(pcm), 0);
     pcm = ssys_open("PCM:22050,16,1", O_WR);
     ASSERT_TRUE(pcm >= 0);
-    sst_cursor_t c = {g_blob, g_blob + sizeof g_blob, false};
-    std_sst_save(&c, 0);
+    sst_cursor_t c = {g_blob, g_blob + std_sst.size, false, NULL};
+    std_sst.save(&c, 0);
     ASSERT_TRUE(sst_ok(&c));
     std_reset();
     char p[512];
     snprintf(p, sizeof p, "%s/a.txt", host_dir());
     ASSERT_EQ(remove(p), 0);
-    sst_cursor_t r = {g_blob, c.at, false};
-    ASSERT_FALSE(std_sst_load(&r, 0));
+    sst_cursor_t r = {g_blob, c.at, false, NULL};
+    ASSERT_FALSE(std_sst.load(&r, 0));
     std_reset();
     pcm = ssys_open("PCM:22050,16,1", O_WR);
     ASSERT_TRUE(pcm >= 0);

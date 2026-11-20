@@ -7,6 +7,7 @@
 #include "core/term/cells.h"
 #include "core/term/grid.h"
 #include "core/term/term.h"
+#include "machine.h"
 #include <assert.h>
 #include <string.h>
 
@@ -105,7 +106,7 @@ static inline bool grid_all_columns(const term_grid_t *g)
 }
 
 // Whether column x is between the left and right margins.
-static inline bool grid_in_columns(const term_grid_t *g, unsigned x)
+static inline HOST_IN_RAM_FUNC bool grid_in_columns(const term_grid_t *g, unsigned x)
 {
     return x >= g->margin_left && x <= g->margin_right;
 }
@@ -288,6 +289,48 @@ static bool grid_full_region(const term_grid_t *g)
     return g->margin_top == 0 && g->margin_bot == g->height - 1 && grid_all_columns(g);
 }
 
+bool HOST_IN_RAM_FUNC grid_index_scrolls(const term_grid_t *g)
+{
+    const term_pos_t *pos = g->cur;
+    return pos->y == g->margin_bot && grid_in_columns(g, pos->x);
+}
+
+bool HOST_IN_RAM_FUNC grid_ri_scrolls(const term_grid_t *g)
+{
+    const term_pos_t *pos = g->cur;
+    return pos->y == g->margin_top && grid_in_columns(g, pos->x);
+}
+
+bool HOST_IN_RAM_FUNC grid_glyph_scrolls(const term_t *t, const term_grid_t *g)
+{
+    return g->cur->wrap_pending && t->autowrap && grid_index_scrolls(g);
+}
+
+// A scroll of one row by an index or a reverse index moves the row a
+// scanline a frame under DECSCLM, but one between left and right margins,
+// which a VT102 never had, jumps.
+static bool grid_smooths(const term_t *t, const term_grid_t *g)
+{
+    return t->smooth_scroll && grid_all_columns(g);
+}
+
+// Before such a scroll, the row going out is paid what it is owed, such as
+// an erase, because it still shows while it goes.
+static void grid_smooth_out(term_t *t, term_grid_t *g, uint8_t y)
+{
+    if (grid_smooths(t, g))
+        cells_touch(t, g, y);
+}
+
+// After it, the rows [top, bot] start moving. out is the line size of the
+// row that left.
+static void grid_smooth(term_t *t, term_grid_t *g, uint8_t top, uint8_t bot, bool up,
+                        uint8_t out)
+{
+    if (grid_smooths(t, g))
+        cells_smooth(t, g, top, bot, up, out);
+}
+
 // Index: down a row, scrolling the region at its bottom margin. The core of
 // LF, VT, FF, IND and NEL. Below the region the cursor walks down to the last
 // row and never scrolls. Outside the left and right margins it stays on the
@@ -304,13 +347,20 @@ static void grid_index_move(term_t *t, term_grid_t *g)
     }
     else if (!grid_in_columns(g, pos->x))
         ;
-    else if (grid_full_region(g))
-    {
-        grid_lines_scroll(g, 0, (uint8_t)(g->height - 1), 1, true);
-        cells_index(t, g, true);
-    }
     else
-        grid_scroll(t, g, g->margin_top, g->margin_bot, 1, true);
+    {
+        uint8_t top = g->margin_top, bot = g->margin_bot;
+        uint8_t out = term_lines(g)[top];
+        grid_smooth_out(t, g, top);
+        if (grid_full_region(g))
+        {
+            grid_lines_scroll(g, 0, (uint8_t)(g->height - 1), 1, true);
+            cells_index(t, g, true);
+        }
+        else
+            grid_scroll(t, g, top, bot, 1, true);
+        grid_smooth(t, g, top, bot, true, out);
+    }
 }
 
 static void grid_index(term_t *t, term_grid_t *g)
@@ -333,13 +383,20 @@ static void grid_reverse_index(term_t *t, term_grid_t *g)
     }
     else if (!grid_in_columns(g, pos->x))
         ;
-    else if (grid_full_region(g))
-    {
-        grid_lines_scroll(g, 0, (uint8_t)(g->height - 1), 1, false);
-        cells_index(t, g, false);
-    }
     else
-        grid_scroll(t, g, g->margin_top, g->margin_bot, 1, false);
+    {
+        uint8_t top = g->margin_top, bot = g->margin_bot;
+        uint8_t out = term_lines(g)[bot];
+        grid_smooth_out(t, g, bot);
+        if (grid_full_region(g))
+        {
+            grid_lines_scroll(g, 0, (uint8_t)(g->height - 1), 1, false);
+            cells_index(t, g, false);
+        }
+        else
+            grid_scroll(t, g, top, bot, 1, false);
+        grid_smooth(t, g, top, bot, false, out);
+    }
     grid_after_scroll(t, g);
 }
 
@@ -1337,74 +1394,40 @@ void grid_do(term_t *t, term_grid_t *g, grid_op_t op, uint8_t ch)
 
 /* ---- savestate --------------------------------------------------------- */
 
-static void grid_put_pos(sst_cursor_t *c, const term_pos_t *p)
+/* Everything here indexes the cells or the line sizes. A grid with cells
+ * has its width checked by their owner. */
+bool term_grid_sst_ok(sst_cursor_t *c, const term_grid_t *g, uint8_t rows)
 {
-    sst_put_u8(c, p->x);
-    sst_put_u8(c, p->y);
-    sst_put_bool(c, p->wrap_pending);
-}
-
-static void grid_get_pos(sst_cursor_t *c, term_pos_t *p)
-{
-    p->x = sst_get_u8(c);
-    p->y = sst_get_u8(c);
-    p->wrap_pending = sst_get_bool(c);
+    const uint8_t w = g->width, h = g->height;
+    if (g->rows != rows)
+        return sst_refuse(c, "a grid of other rows");
+    if (w < 1 || h < 1 || h > rows || g->margin_top > g->margin_bot ||
+        g->margin_bot >= h || g->margin_left > g->margin_right || g->margin_right >= w)
+        return sst_refuse(c, "a grid's size or margins out of range");
+    for (int s = 0; s < 2; s++)
+        if (g->pos[s].x >= w || g->pos[s].y >= h ||
+            g->saved[s].x >= w || g->saved[s].y >= h)
+            return sst_refuse(c, "a cursor off its grid");
+    for (unsigned i = 0; i < 2u * rows; i++)
+        if (g->lines[i] > TERM_LINE_BOTTOM)
+            return sst_refuse(c, "a line size out of range");
+    /* The cursor sits inside its own line's columns. */
+    for (int s = 0; s < 2; s++)
+        if (g->lines[s * rows + g->pos[s].y] && g->pos[s].x >= w / 2)
+            return sst_refuse(c, "a cursor past its line's columns");
+    return true;
 }
 
 void term_grid_sst_put(sst_cursor_t *c, const term_grid_t *g)
 {
-    sst_put_u8(c, g->width);
-    sst_put_u8(c, g->height);
-    sst_put_u8(c, g->rows);
-    sst_put_u8(c, g->margin_top);
-    sst_put_u8(c, g->margin_bot);
-    sst_put_u8(c, g->margin_left);
-    sst_put_u8(c, g->margin_right);
-    for (int s = 0; s < 2; s++)
-    {
-        grid_put_pos(c, &g->pos[s]);
-        grid_put_pos(c, &g->saved[s]);
-    }
-    sst_put(c, g->tab_stops, TERM_TAB_BITMAP_BYTES);
+    TERM_GRID_SST_ROWS(SST_ROW_PUT2, (*g))
     sst_put(c, g->lines, 2u * g->rows);
 }
 
-/* The grid keeps its rows and lines storage; a blob of another shape is
- * refused. A grid with cells has its width checked by their owner.
- * Everything else is bounded, because it indexes the cells. */
 bool term_grid_sst_get(sst_cursor_t *c, term_grid_t *g)
 {
-    uint8_t w = sst_get_u8(c);
-    uint8_t h = sst_get_u8(c);
-    uint8_t rows = sst_get_u8(c);
-    if (!sst_ok(c) || w < 1 || rows != g->rows || h < 1 || h > rows)
-        return false;
-    g->width = w;
-    g->height = h;
-    g->margin_top = sst_get_u8(c);
-    g->margin_bot = sst_get_u8(c);
-    g->margin_left = sst_get_u8(c);
-    g->margin_right = sst_get_u8(c);
-    for (int s = 0; s < 2; s++)
-    {
-        grid_get_pos(c, &g->pos[s]);
-        grid_get_pos(c, &g->saved[s]);
-    }
-    sst_get(c, g->tab_stops, TERM_TAB_BITMAP_BYTES);
+    const uint8_t rows = g->rows;
+    TERM_GRID_SST_ROWS(SST_ROW_GET2, (*g))
     sst_get(c, g->lines, 2u * rows);
-    if (!sst_ok(c) || g->margin_top > g->margin_bot || g->margin_bot >= h ||
-        g->margin_left > g->margin_right || g->margin_right >= w)
-        return false;
-    for (int s = 0; s < 2; s++)
-        if (g->pos[s].x >= w || g->pos[s].y >= h ||
-            g->saved[s].x >= w || g->saved[s].y >= h)
-            return false;
-    for (unsigned i = 0; i < 2u * rows; i++)
-        if (g->lines[i] > TERM_LINE_BOTTOM)
-            return false;
-    /* The cursor sits inside its own line's columns. */
-    for (int s = 0; s < 2; s++)
-        if (g->lines[s * rows + g->pos[s].y] && g->pos[s].x >= w / 2)
-            return false;
-    return true;
+    return sst_ok(c) && term_grid_sst_ok(c, g, rows);
 }

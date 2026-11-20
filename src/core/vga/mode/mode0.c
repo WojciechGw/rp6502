@@ -16,6 +16,60 @@ mode0_colors_t mode0_colors[MODE0_CELLS] __attribute__((aligned(4)));
 uint16_t mode0_palette[2 * MODE0_ENTRIES];
 volatile mode0_regs_t mode0_regs;
 
+static void mode0_sst_put_cells(sst_cursor_t *c, unsigned flags)
+{
+    (void)flags;
+    sst_put(c, mode0_cells, sizeof mode0_cells);
+    sst_put(c, mode0_colors, sizeof mode0_colors);
+}
+
+static bool mode0_sst_get_cells(sst_cursor_t *c, unsigned flags)
+{
+    (void)flags;
+    sst_get(c, mode0_cells, sizeof mode0_cells);
+    sst_get(c, mode0_colors, sizeof mode0_colors);
+    return sst_ok(c);
+}
+
+/* A glyph indexes the font of its size, and a color the palette. */
+static bool mode0_sst_cells_ok(sst_cursor_t *c)
+{
+    for (unsigned i = 0; i < MODE0_CELLS; i++)
+        if (!mode0_glyph_ok(mode0_cells[i].glyph, i < MODE0_CELLS_40 ? 8 : 16) ||
+            !mode0_color_ok(mode0_colors[i].fg_color) ||
+            !mode0_color_ok(mode0_colors[i].bg_color) ||
+            !mode0_color_ok(mode0_colors[i].ul_color))
+            return sst_refuse(c, "a cell outside the font or the palette");
+    return true;
+}
+
+static void mode0_sst_put_palette(sst_cursor_t *c, unsigned flags)
+{
+    (void)flags;
+    for (unsigned i = 0; i < MODE0_ENTRIES; i++)
+        sst_put_u16(c, mode0_palette[i]);
+}
+
+static bool mode0_sst_get_palette(sst_cursor_t *c, unsigned flags)
+{
+    (void)flags;
+    for (unsigned i = 0; i < MODE0_ENTRIES; i++)
+        mode0_set_color(i, sst_get_u16(c));
+    return sst_ok(c);
+}
+
+#define MODE0_SST(X)                                                   \
+    X(FN, mode0_sst_put_cells, mode0_sst_get_cells,                    \
+      sizeof mode0_cells + sizeof mode0_colors, 1)                     \
+    X(IN_FN, mode0_cells)                                              \
+    X(IN_FN, mode0_colors)                                             \
+    X(VALIDATE, mode0_sst_cells_ok)                                    \
+    X(FN, mode0_sst_put_palette, mode0_sst_get_palette,                \
+      2 * MODE0_ENTRIES, 1)                                            \
+    X(IN_FN, mode0_palette)                                            \
+    X(SKIP, mode0_regs, "published again by the canvas's load")
+SST_TABLE(mode0, MODE0_SST)
+
 /* Indexed by row, then by style: none, single, double, curly, dotted,
  * dashed. The curly underline is a wave three rows tall and a cell wide on
  * the 16-row glyphs, its crest and its trough three pixels each, with the
@@ -169,9 +223,39 @@ mode0_render_term(int16_t scanline_id, int16_t begin, uint16_t *rgb, const int c
     scanline_id -= begin;
     if ((uint16_t)scanline_id >= TERM_MAX_HEIGHT * ch)
         return false;
-    const uint8_t logical_row = (uint8_t)(scanline_id / ch);
-    const uint8_t scanrow = (uint8_t)(scanline_id % ch);
-    const uint32_t row_word = mode0_regs.row[logical_row];
+    uint8_t logical_row = (uint8_t)(scanline_id / ch);
+    uint8_t scanrow = (uint8_t)(scanline_id % ch);
+    uint32_t row_word = mode0_regs.row[logical_row];
+    /* A smooth scroll moving: a scanline of its rows shows the rows where
+     * they were, moved on by the scanlines it has gone, with the row going
+     * out still at the edge it leaves by. A row of the ghost has no cursor. */
+    const uint32_t region = mode0_regs.smooth;
+    if ((region & MODE0_SMOOTH_ON) && logical_row >= MODE0_SMOOTH_TOP(region) &&
+        logical_row <= MODE0_SMOOTH_BOT(region))
+    {
+        const unsigned moved = mode0_smooth_moved(mode0_regs.smooth_frame,
+                                                  (uint32_t)vga_frame_count(), (unsigned)ch);
+        if (moved < (unsigned)ch)
+        {
+            const uint8_t top = MODE0_SMOOTH_TOP(region);
+            const uint8_t bot = MODE0_SMOOTH_BOT(region);
+            const bool up = region & MODE0_SMOOTH_UP;
+            const unsigned at = (unsigned)(scanline_id - top * ch) +
+                                (up ? moved : (unsigned)ch - moved);
+            const unsigned r = at / ch;
+            scanrow = (uint8_t)(at % ch);
+            if (up ? r == 0 : r == (unsigned)(bot - top + 1))
+            {
+                row_word = mode0_regs.smooth_ghost;
+                logical_row = 0xFF;
+            }
+            else
+            {
+                logical_row = (uint8_t)(top + r - (up ? 1 : 0));
+                row_word = mode0_regs.row[logical_row];
+            }
+        }
+    }
     const uint32_t cursor = mode0_regs.cursor;
     const uint32_t screen = mode0_regs.screen;
     const bool reverse = screen & MODE0_SCREEN_REVERSE;

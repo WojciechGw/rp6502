@@ -25,6 +25,12 @@
 void cells_init(void);
 void cells_task(void);
 
+/* The terminal and the cells of both sizes as at power-up: every cell blank,
+ * new grids at TERM_STD_HEIGHT, and a RIS. It is the RESET hook, because a
+ * load that fails leaves any value in all of them. The renderer's RESET,
+ * which runs first, leaves setting the heights again to its next task. */
+void cells_restart(void);
+
 /* The console's terminal. On a machine that runs a program and draws its
  * screen in one, it is this file's; the RIA has its own, which follows the
  * VGA's (ria/term/cells.c). */
@@ -37,10 +43,10 @@ void cells_RIS(void);
 void cells_RIS_no_clear(void);
 
 /* Writes mode 0's words for the size showing. cells_out_chars calls it
- * after each batch of the console's bytes, cells_sst_load after a load,
- * and cells_task after the blinks, a reset or a new height. Something else
- * that changes what shows calls it too: a savestate load that puts the
- * canvas back, or a test that feeds term_write directly. */
+ * after each batch of the console's bytes, and cells_task after the blinks,
+ * a reset or a new height. Something else that changes what shows calls it
+ * too: a savestate load that puts the canvas back, or a test that feeds
+ * term_write directly. */
 void cells_publish(void);
 
 // The renderer reports its geometry: rows of the 40- or 80-column terminal.
@@ -48,35 +54,16 @@ void cells_set_height(uint8_t width, uint8_t height);
 
 /* The chunk holds the terminal (term.h) and both sizes in full: each one's
  * grid, the layout of its screens' cells (the scroll remap and the fills
- * its rows are owed) and its blinks, then the cursor's color, the cells, the
- * colors of each, and the palette the cells' colors name: its 256
- * entries and the default foreground and background.
- *
- * The cells' addresses are never written, because they are mode 0's
- * (mode0_cells), the same in every build of a machine.
- *
- * The chunk starts with the terminal dimensions and a load rejects a chunk
- * whose dimensions differ, because a blob made at a taller height would put
- * its rows in the wrong places. */
-#define CELLS_BUF_SST_SIZE (14 * TERM_MAX_HEIGHT + 3)
-#define CELLS_ONE_SST_SIZE (TERM_GRID_SST_SIZE(TERM_MAX_HEIGHT) + 2 * CELLS_BUF_SST_SIZE + 18)
-#define CELLS_COUNT_SST (TERM_MAX_HEIGHT * (40 + 80) * (TERM_ALT_SCREEN ? 2 : 1))
-#define CELLS_MEM_SST_SIZE (4 * CELLS_COUNT_SST)
-#define CELLS_COLORS_SST_SIZE (6 * CELLS_COUNT_SST)
-#define CELLS_PALETTE_SST_SIZE (2 * 258)
-#define CELLS_SST_SIZE (3 + TERM_SST_SIZE + 2 * CELLS_ONE_SST_SIZE + 2 + CELLS_MEM_SST_SIZE + \
-                        CELLS_COLORS_SST_SIZE + CELLS_PALETTE_SST_SIZE)
-void cells_sst_save(sst_cursor_t *c, unsigned flags);
-bool cells_sst_load(sst_cursor_t *c, unsigned flags);
+ * its rows are owed) and its blinks, then the cursor's color. The cells,
+ * their colors and the palette are MODE0_DRIVER's (mode0.h), which follows
+ * this one in the driver list. */
+extern const sst_table_t cells_sst;
 
 #define CELLS_DRIVER DRIVER(                                    \
     INIT(cells_init)                                            \
     TASK_FATFS(cells_task)                                      \
-    SST(.id = "CELL",                                           \
-        .version = 13,                                          \
-        .size = CELLS_SST_SIZE,                                 \
-        .save = cells_sst_save,                                 \
-        .load = cells_sst_load))
+    RESET(cells_restart)                                        \
+    SST("CELL", cells))
 
 /* ---- what the terminal asks of the screen ------------------------------
  *
@@ -172,6 +159,16 @@ void cells_scroll_cols(term_t *t, term_grid_t *g, uint8_t top, uint8_t bot, unsi
 // The whole screen moves a row up, the top row joining the scrollback, or a
 // row down, the newest row of the scrollback lost.
 void cells_index(term_t *t, term_grid_t *g, bool up);
+
+// Under DECSCLM, rows [top, bot] just scrolled a row up or down by an index
+// or a reverse index, and the screen shows them move there a scanline a
+// frame from the next frame, over TERM_SMOOTH_FRAMES. out is the line size
+// of the row that went, which shows until it is gone. A scroll still
+// moving finishes at once.
+void cells_smooth(term_t *t, term_grid_t *g, uint8_t top, uint8_t bot, bool up, uint8_t out);
+
+// A smooth scroll of g is still moving.
+bool cells_smooth_busy(const term_grid_t *g);
 
 // ED 3: the scrollback is forgotten.
 void cells_forget(term_t *t, term_grid_t *g);

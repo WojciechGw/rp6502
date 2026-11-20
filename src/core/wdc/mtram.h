@@ -154,13 +154,10 @@ const uint8_t *mtram_dbg_block(uint8_t block);
                       MTRAM_OW_SST_SIZE)
 void mtram_sst_save(sst_cursor_t *c, unsigned flags);
 bool mtram_sst_load(sst_cursor_t *c, unsigned flags);
+extern const sst_table_t mtram_sst;
 
 #define MTRAM_DRIVER DRIVER(                                  \
     TASK_PUMPED(mtram_task)                                   \
-    SST(.id = "MTRM",                                         \
-        .version = 4,                                         \
-        .size = MTRAM_SST_SIZE,                               \
-        .save = mtram_sst_save,                               \
-        .load = mtram_sst_load))
+    SST("MTRM", mtram))
 
 #endif /* _CORE_WDC_MTRAM_H_ */

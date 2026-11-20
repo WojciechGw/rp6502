@@ -8,6 +8,7 @@
 
 #include "osal/vol.h"
 #include "core/str/oem.h"
+#include "core/sys/sst.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +32,12 @@ struct vol
 static struct vol vols[VOL_MAX];
 static int vol_n;
 static vol_t *vol_cur;
+
+#define OSAL_VOL_SST(X)                                                   \
+    X(SKIP, vols, "the command line's drive table; saved paths name drives") \
+    X(SKIP, vol_n, "the command line's drive table")                      \
+    X(SKIP, vol_cur, "the DIR row's working directory names the drive")
+SST_TABLE(osal_vol, OSAL_VOL_SST)
 
 /* Windows matches names without case and takes either slash. */
 static bool vol_same(char a, char b)

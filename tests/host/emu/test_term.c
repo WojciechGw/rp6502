@@ -7,9 +7,11 @@
 /* term.c, the console's terminal, fed through the console and read through
  * its view. The console canvas holds the 80-column terminal, 30 rows. */
 
+#include "core/api/xreg.h"
 #include "core/com/com.h"
 #include "core/com/manifold.h"
 #include "core/com/rln.h"
+#include "core/com/console.h"
 #include "core/str/str.h"
 #include "core/sys/sst.h"
 #include "core/sys/sys.h"
@@ -19,6 +21,7 @@
 #include "tb_screen.h"
 #include "core/vga/vga.h"
 #include "core/vga/vga_emu.h"
+#include "core/vga/mode/mode0.h"
 #include "utest.h"
 #include <stdio.h>
 #include <string.h>
@@ -57,6 +60,8 @@ static const char *ask(const char *q)
 static void fresh(void)
 {
     sys_init();
+    /* No frames run, so the console's line keeps no pace. */
+    manifold_set_paced(false);
     feed("\30\33c");
     for (int i = 0; i < TB_SCREEN_SETTLE; i++)
         cells_task();
@@ -594,6 +599,16 @@ UTEST(term, decrqm)
     ASSERT_STREQ(ask("\33[?4000$p"), "\33[?4000;0$y");
 }
 
+/* DECCOLM is 80 columns or 132. The 40-column screen is neither. */
+UTEST(term, decrqm_deccolm_on_the_40_column_screen)
+{
+    fresh();
+    ASSERT_TRUE(xreg1(0, 0, vga_canvas_320_240));
+    ASSERT_STREQ(ask("\33[?3$p"), "\33[?3;0$y");
+    ASSERT_TRUE(xreg1(0, 0, vga_canvas_console));
+    ASSERT_STREQ(ask("\33[?3$p"), "\33[?3;4$y");
+}
+
 /* ---- the keyboard's modes: the terminal holds them, the keyboard reads --- */
 
 UTEST(term, the_keyboard_modes_set_reset_and_report)
@@ -666,25 +681,26 @@ UTEST(term, the_keyboard_modes_belong_to_no_screen)
 
 UTEST(term, a_savestate_carries_the_keyboard_modes)
 {
-    static uint8_t blob[CELLS_SST_SIZE];
+    static uint8_t blob[1 << 18];
     fresh();
     feed("\33[?1h\33=\33[?8l");
-    sst_cursor_t c = {blob, blob + sizeof blob, false};
-    cells_sst_save(&c, 0);
+    ASSERT_LE((size_t)cells_sst.size, sizeof blob);
+    sst_cursor_t c = {blob, blob + cells_sst.size, false, NULL};
+    cells_sst.save(&c, 0);
     ASSERT_TRUE(sst_ok(&c));
     feed("\33c");
-    c = (sst_cursor_t){blob, blob + sizeof blob, false};
-    ASSERT_TRUE(cells_sst_load(&c, 0));
+    c = (sst_cursor_t){blob, blob + cells_sst.size, false, NULL};
+    ASSERT_TRUE(cells_sst.load(&c, 0));
     ASSERT_TRUE(sst_ok(&c));
     ASSERT_TRUE(cells_term.app_cursor);
     ASSERT_TRUE(cells_term.app_keypad);
     ASSERT_FALSE(cells_term.autorepeat);
     feed("\33[?1l\33[?8h");
-    c = (sst_cursor_t){blob, blob + sizeof blob, false};
-    cells_sst_save(&c, 0);
+    c = (sst_cursor_t){blob, blob + cells_sst.size, false, NULL};
+    cells_sst.save(&c, 0);
     feed("\33[?1h\33[?8l");
-    c = (sst_cursor_t){blob, blob + sizeof blob, false};
-    ASSERT_TRUE(cells_sst_load(&c, 0));
+    c = (sst_cursor_t){blob, blob + cells_sst.size, false, NULL};
+    ASSERT_TRUE(cells_sst.load(&c, 0));
     ASSERT_FALSE(cells_term.app_cursor);
     ASSERT_TRUE(cells_term.app_keypad);
     ASSERT_TRUE(cells_term.autorepeat);
@@ -1528,13 +1544,13 @@ UTEST(term, rep_draws_what_printing_draws)
  * savestate: both come back over a console that has since lost them. */
 UTEST(term, the_palette_and_the_guards_come_back)
 {
-    static uint8_t blob[1 << 20], undo[1 << 20];
+    static uint8_t blob[1 << 20];
     fresh();
     feed("\33]4;1;#102030\7\33]10;#405060\7\33[31mA\33[39mB\33[1\"qG\33[0\"qh");
     ASSERT_EQ(sst_save(blob, sizeof blob, 0), (const char *)NULL);
     feed("\33c");
     ASSERT_STREQ(row(0), "");
-    ASSERT_EQ(sst_load(blob, sst_size(), undo, 0), (const char *)NULL);
+    ASSERT_EQ(sst_load(blob, sst_size(), 0), (const char *)NULL);
     ASSERT_STREQ(row(0), "ABGh");
     ASSERT_EQ(mode0_color(ink(0, 0)->fg_color), rgb(0x10, 0x20, 0x30));
     ASSERT_EQ(mode0_color(ink(1, 0)->fg_color), rgb(0x40, 0x50, 0x60));
@@ -1546,13 +1562,13 @@ UTEST(term, the_palette_and_the_guards_come_back)
  * load: the survivors, and the blank color for each side. */
 UTEST(term, a_shift_still_owed_comes_back)
 {
-    static uint8_t blob[1 << 20], undo[1 << 20];
+    static uint8_t blob[1 << 20];
     fresh();
     feed("\33[3;1HABCDEF\33[10;1H\33[41m\33[2 A\33[42m\33[3 @");
     ASSERT_EQ(sst_save(blob, sizeof blob, 0), (const char *)NULL);
     feed("\33c");
     ASSERT_STREQ(row(2), "");
-    ASSERT_EQ(sst_load(blob, sst_size(), undo, 0), (const char *)NULL);
+    ASSERT_EQ(sst_load(blob, sst_size(), 0), (const char *)NULL);
     ASSERT_STREQ(row(2), "BCDEF");
     ASSERT_EQ(mode0_color(ink(79, 2)->bg_color), color_256[2]);
     feed("\33[3;1H\33[43m\33[2 A");
@@ -1802,12 +1818,12 @@ UTEST(term, declrmm_has_no_double_size_lines)
 /* The margins are part of a savestate. */
 UTEST(term, the_left_and_right_margins_come_back)
 {
-    static uint8_t blob[1 << 20], undo[1 << 20];
+    static uint8_t blob[1 << 20];
     fresh();
     feed("\33[?69h\33[5;10s");
     ASSERT_EQ(sst_save(blob, sizeof blob, 0), (const char *)NULL);
     feed("\33c");
-    ASSERT_EQ(sst_load(blob, sst_size(), undo, 0), (const char *)NULL);
+    ASSERT_EQ(sst_load(blob, sst_size(), 0), (const char *)NULL);
     feed("\33[1;5Habcdefgh");
     ASSERT_STREQ(row(0), "    abcdef");
     ASSERT_STREQ(row(1), "    gh");
@@ -2152,12 +2168,12 @@ UTEST(term, a_scroll_between_margins_is_right_at_every_width)
 /* A change of attributes a row is owed is saved with the row. */
 UTEST(term, attributes_still_owed_come_back)
 {
-    static uint8_t blob[1 << 20], undo[1 << 20];
+    static uint8_t blob[1 << 20];
     fresh();
     feed("\33[3;1HABCDEF\33[10;1H\33[2*x\33[3;2;3;4;4;7$r");
     ASSERT_EQ(sst_save(blob, sizeof blob, 0), (const char *)NULL);
     feed("\33c");
-    ASSERT_EQ(sst_load(blob, sst_size(), undo, 0), (const char *)NULL);
+    ASSERT_EQ(sst_load(blob, sst_size(), 0), (const char *)NULL);
     ASSERT_EQ(cell(0, 2)->attributes, 0);
     ASSERT_EQ(cell(1, 2)->attributes, TERM_ATTR_UL(TERM_UL_SINGLE) | MODE0_ATTR_REVERSE);
     ASSERT_EQ(cell(3, 2)->attributes, TERM_ATTR_UL(TERM_UL_SINGLE) | MODE0_ATTR_REVERSE);
@@ -2229,7 +2245,7 @@ UTEST(term, rep_between_margins_draws_what_printing_draws)
  * savestate. */
 UTEST(term, line_feeds_between_margins_add_up)
 {
-    static uint8_t blob[1 << 20], undo[1 << 20];
+    static uint8_t blob[1 << 20];
     fresh();
     lettered(6);
     feed("\33[?69h\33[2;5r\33[4;7s\33[5;5H\n\n");
@@ -2255,7 +2271,7 @@ UTEST(term, line_feeds_between_margins_add_up)
     feed("\33[2;4Hrs\33[5;5H\n");
     ASSERT_EQ(sst_save(blob, sizeof blob, 0), (const char *)NULL);
     feed("\33c");
-    ASSERT_EQ(sst_load(blob, sst_size(), undo, 0), (const char *)NULL);
+    ASSERT_EQ(sst_load(blob, sst_size(), 0), (const char *)NULL);
     ASSERT_STREQ(row(1), "bbb    bbb");
     ASSERT_STREQ(row(2), "ccc z  ccc");
     ASSERT_STREQ(row(0), "aaaaaaaaaa");
@@ -2399,11 +2415,11 @@ UTEST(term, a_dcs_string_that_is_not_decrqss_is_dropped)
     ASSERT_STREQ(ask("\33P+qmmmmmmmmmmmmmmmmmmmmmmmm\33\\"), "");
     ASSERT_STREQ(row(0), "abcdef");
     /* A string split across a savestate is still answered. */
-    static uint8_t blob[1 << 20], undo[1 << 20];
+    static uint8_t blob[1 << 20];
     feed("\33P$qr\33");
     ASSERT_EQ(sst_save(blob, sizeof blob, 0), (const char *)NULL);
     feed("\33c");
-    ASSERT_EQ(sst_load(blob, sst_size(), undo, 0), (const char *)NULL);
+    ASSERT_EQ(sst_load(blob, sst_size(), 0), (const char *)NULL);
     ASSERT_STREQ(ask("\\"), "\33P1$r1;30r\33\\");
 }
 
@@ -2482,6 +2498,133 @@ UTEST(term, what_neovim_asks_as_it_starts_is_all_answered)
     ASSERT_STREQ(ask("\33P$qm\33\\"), "\33P1$r0m\33\\");
     /* And as it leaves. */
     ASSERT_STREQ(ask("\33[>4;0m\33[c"), "\33[?6c");
+}
+
+/* ---- smooth scroll ---- */
+
+/* The row a smooth scroll is moving out, as text, trailing spaces dropped. */
+static const char *ghost(void)
+{
+    static char text[96];
+    const mode0_cell_t *c = &mode0_cells[MODE0_ROW_CELL(mode0_regs.smooth_ghost)];
+    int last = 0;
+    for (int x = 0; x < 80; x++)
+    {
+        text[x] = (char)mode0_glyph_code(c[x].glyph);
+        if (text[x] != ' ')
+            last = x + 1;
+    }
+    text[last] = 0;
+    return text;
+}
+
+UTEST(term, decsclm_is_reported)
+{
+    fresh();
+    ASSERT_STREQ(ask("\33[?4$p"), "\33[?4;2$y");
+    ASSERT_STREQ(ask("\33[?4h\33[?4$p"), "\33[?4;1$y");
+}
+
+/* The row going out still shows while it goes, so an erase it was owed is
+ * paid first: a whole-screen scroll after ED 2 moves out a blank row. */
+UTEST(term, a_smooth_scroll_moves_out_the_row_as_it_is)
+{
+    fresh();
+    feed("\33[HXXXX\33[?4h\33[2J\33[30;1H\n");
+    ASSERT_TRUE(mode0_regs.smooth & MODE0_SMOOTH_ON);
+    ASSERT_STREQ(ghost(), "");
+}
+
+/* The same for a reverse index in a region, whose bottom row goes out. */
+UTEST(term, a_smooth_reverse_index_moves_out_the_bottom_row_as_it_is)
+{
+    fresh();
+    feed("\33[10;1HYYYY\33[?4h\33[5;10r\33[5;1H\33[J\33M");
+    ASSERT_FALSE(mode0_regs.smooth & MODE0_SMOOTH_UP);
+    ASSERT_STREQ(ghost(), "");
+    feed("\33[r");
+}
+
+/* A line feed that would scroll the moving rows again waits for them to
+ * land, which takes TERM_SMOOTH_FRAMES frames. Text goes on into the row
+ * coming in. */
+UTEST(term, a_smooth_scroll_holds_the_next_line_feed)
+{
+    fresh();
+    feed("\33[?4h\33[30;1H\n");
+    ASSERT_TRUE(term_holds(&cells_term, '\n'));
+    ASSERT_FALSE(term_holds(&cells_term, 'A'));
+    int frames = 0;
+    while (term_holds(&cells_term, '\n') && frames < 100)
+    {
+        vga_run_frame();
+        frames++;
+    }
+    ASSERT_EQ(frames, TERM_SMOOTH_FRAMES);
+}
+
+/* A line feed that has to wait, behind one that is scrolling: what the
+ * console's output holds while a smooth scroll moves. */
+static bool held_line_feed(void)
+{
+    fresh();
+    feed("\33[?4h\33[30;1H\n\n");
+    return !manifold_drained();
+}
+
+/* A sync of the console returns once both lines have arrived. */
+UTEST(term, a_console_sync_waits_for_the_scroll)
+{
+    ASSERT_TRUE(held_line_feed());
+    api_errno err;
+    ASSERT_EQ(console_std_sync(1, &err), STD_PENDING);
+    int frames = 0;
+    while (console_std_sync(1, &err) == STD_PENDING && frames < 100)
+    {
+        vga_run_frame();
+        frames++;
+    }
+    ASSERT_TRUE(frames > TERM_SMOOTH_FRAMES);
+    ASSERT_TRUE(frames <= 2 * TERM_SMOOTH_FRAMES);
+    ASSERT_TRUE(manifold_drained());
+}
+
+/* The end of a chain waits for no scroll: what was held goes out at once. */
+UTEST(term, the_end_of_a_chain_releases_a_held_line)
+{
+    ASSERT_TRUE(held_line_feed());
+    term_release_smooth(&cells_term);
+    manifold_task();
+    ASSERT_TRUE(manifold_drained());
+    /* DECSCLM set again holds again. */
+    feed("\33[?4h\n\n");
+    ASSERT_TRUE(!manifold_drained());
+}
+
+static char rln_got[8];
+static void rln_cb(bool timeout, const char *buf)
+{
+    (void)timeout;
+    snprintf(rln_got, sizeof rln_got, "%s", buf);
+}
+
+/* A read started while a line is held is laid out once it has arrived, and
+ * the keys typed wait for it. */
+UTEST(term, a_read_waits_for_the_held_line)
+{
+    ASSERT_TRUE(held_line_feed());
+    rln_read_line(rln_cb, NULL);
+    manifold_uart_push("hi\r", 3);
+    rln_got[0] = 0;
+    int frames = 0;
+    while (!rln_got[0] && frames < 100)
+    {
+        vga_run_frame();
+        frames++;
+    }
+    ASSERT_STREQ(rln_got, "hi");
+    ASSERT_TRUE(frames > TERM_SMOOTH_FRAMES);
+    ASSERT_EQ(cy(), 29);
 }
 
 UTEST_MAIN();

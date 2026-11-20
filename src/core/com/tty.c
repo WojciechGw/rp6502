@@ -6,12 +6,17 @@
 
 #include "core/com/tty.h"
 #include "core/com/com.h"
+#include "core/com/console.h"
 #include "core/com/manifold.h"
+#include "core/com/rln.h"
 #include "core/str/str.h"
 #include "machine.h"
 #include <strings.h>
 
 static bool tty_was_asked;
+
+#define TTY_SST_ROWS(X) X(BOOL, tty_was_asked)
+SST_TABLE(tty, TTY_SST_ROWS)
 
 bool tty_std_handles(const char *path)
 {
@@ -33,6 +38,14 @@ std_rw_result tty_std_close(int desc, api_errno *err)
     return STD_OK;
 }
 
+// The same wait as CON:'s: until what was written shows.
+std_rw_result tty_std_sync(int desc, api_errno *err)
+{
+    (void)desc;
+    (void)err;
+    return console_rendered() ? STD_OK : STD_PENDING;
+}
+
 std_rw_result tty_std_read(int desc, char *buf, uint32_t count, uint32_t *bytes_read, api_errno *err)
 {
     (void)desc;
@@ -47,7 +60,7 @@ std_rw_result tty_std_write(int desc, const char *buf, uint32_t count, uint32_t 
     (void)desc;
     (void)err;
     uint32_t i = 0;
-    for (; i < count && manifold_cts(); i++)
+    for (; i < count && manifold_cts() && !rln_replying(); i++)
         manifold_putchar_raw(buf[i]);
     *bytes_written = i;
     return STD_OK;
@@ -76,20 +89,4 @@ int tty_std_reopen(sst_cursor_t *c, uint8_t mode, api_errno *err)
     (void)mode;
     (void)err;
     return 0;
-}
-
-void tty_sst_save(sst_cursor_t *c, unsigned flags)
-{
-    (void)flags;
-    sst_put_bool(c, tty_was_asked);
-}
-
-bool tty_sst_load(sst_cursor_t *c, unsigned flags)
-{
-    (void)flags;
-    bool asked = sst_get_bool(c);
-    if (!sst_ok(c))
-        return false;
-    tty_was_asked = asked;
-    return true;
 }

@@ -32,16 +32,10 @@ void sram_tick(uint16_t addr, bool read, uint8_t *data);
  * It is sram[addr] unless an mtRAM has the slot mapped elsewhere. */
 uint8_t *sram_view(uint16_t addr);
 
-#define SRAM_SST_SIZE 0x10000
-void sram_sst_save(sst_cursor_t *c, unsigned flags);
-bool sram_sst_load(sst_cursor_t *c, unsigned flags);
+extern const sst_table_t sram_sst;
 
 #define SRAM_DRIVER DRIVER(                                    \
     INIT(sram_init)                                            \
-    SST(.id = "SRAM",                                          \
-        .version = 1,                                          \
-        .size = SRAM_SST_SIZE,                                 \
-        .save = sram_sst_save,                                 \
-        .load = sram_sst_load))
+    SST("SRAM", sram))
 
 #endif /* _CORE_WDC_SRAM_H_ */

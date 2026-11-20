@@ -975,8 +975,8 @@ static bool mtram_map_valid(const uint8_t *map)
     return true;
 }
 
-/* The blocks go straight into mtram_ext, as sram_sst_load does with sram[]; a
- * refused load is rolled back by sst.c. */
+/* The blocks go straight into mtram_ext, as sram's table does with sram[]; a
+ * refused load is followed by sys_reset. */
 bool mtram_sst_load(sst_cursor_t *c, unsigned flags)
 {
     (void)flags;
@@ -1035,3 +1035,29 @@ bool mtram_sst_load(sst_cursor_t *c, unsigned flags)
     mtram_ow = ow;
     return true;
 }
+
+#define MTRAM_SST(X)                                                        \
+    X(FN, mtram_sst_save, mtram_sst_load, MTRAM_SST_SIZE, 4)                \
+    X(IN_FN, mtram_ext)                                                     \
+    X(IN_FN, mtram_active_map)                                              \
+    X(IN_FN, mtram_task_map)                                                \
+    X(IN_FN, mtram_gate)                                                    \
+    X(IN_FN, mtram_active_task)                                             \
+    X(IN_FN, mtram_edit_task)                                               \
+    X(IN_FN, mtram_knock_pos)                                               \
+    X(IN_FN, mtram_resets)                                                  \
+    X(IN_FN, mtram_resb_low)                                                \
+    X(IN_FN, mtram_cycle)                                                   \
+    X(IN_FN, mtram_temp_cycle)                                              \
+    X(IN_FN, mtram_queue)                                                   \
+    X(IN_FN, mtram_queue_head)                                              \
+    X(IN_FN, mtram_queue_count)                                             \
+    X(IN_FN, mtram_ds)                                                      \
+    X(IN_FN, mtram_ow)                                                      \
+    X(SKIP, mtram_slot, "the load rebuilds it from the active map")         \
+    X(SKIP, mtram_on, "a session's mtRAM setting")                          \
+    X(SKIP, mtram_temp, "a session's mtRAM setting")                        \
+    X(SKIP, mtram_delay, "a session's mtRAM setting")                       \
+    X(SKIP, mtram_ds_count, "a session's mtRAM setting")                    \
+    X(SKIP, mtram_ds_raw, "a session's mtRAM setting")
+SST_TABLE(mtram, MTRAM_SST)
